@@ -317,21 +317,21 @@ void main() {
 
       for (var i = OnboardingState.maxAttempts; i > 1; i--) {
         vm().setCode('000000');
-        expect(await vm().verifyOtp(), isFalse);
+        expect(await vm().verifyOtp(), isNull);
         expect(now().attemptsLeft, i - 1);
         // A rejected code is cleared so the boxes can be retyped.
         expect(now().code, isEmpty);
       }
 
       vm().setCode('000000');
-      expect(await vm().verifyOtp(), isFalse);
+      expect(await vm().verifyOtp(), isNull);
       expect(now().attemptsLeft, 0);
       expect(now().error, contains('Too many incorrect attempts'));
 
       // Locked out until a resend, even with a full-length code typed.
       vm().setCode('123456');
       expect(now().canVerify, isFalse);
-      expect(await vm().verifyOtp(), isFalse);
+      expect(await vm().verifyOtp(), isNull);
     });
 
     test('a network failure during verify does not burn an attempt', () async {
@@ -340,7 +340,7 @@ void main() {
       auth.verifyThrows = const OtpSendException('No internet connection.');
 
       vm().setCode('123456');
-      expect(await vm().verifyOtp(), isFalse);
+      expect(await vm().verifyOtp(), isNull);
       expect(now().attemptsLeft, OnboardingState.maxAttempts);
       expect(now().error, 'No internet connection.');
       // The typed code survives, so a retry does not mean retyping.
@@ -354,7 +354,7 @@ void main() {
 
       auth.verifyThrows = const OtpExpiredException();
       vm().setCode('123456');
-      expect(await vm().verifyOtp(), isFalse);
+      expect(await vm().verifyOtp(), isNull);
 
       expect(now().attemptsLeft, OnboardingState.maxAttempts);
       expect(now().canResend, isTrue);

@@ -7,6 +7,9 @@ import 'package:loc_360/data/repositories/family_repository.dart';
 import 'package:loc_360/features/emergency/emergency_viewmodel.dart';
 import 'package:loc_360/features/home/home_viewmodel.dart';
 import 'package:loc_360/features/onboarding/onboarding_viewmodel.dart';
+import 'package:loc_360/features/splash/splash_viewmodel.dart';
+import 'package:loc_360/data/models/app_user.dart';
+import 'package:loc_360/location_service.dart';
 
 /// The ViewModels run against the fake repositories, so these cover the rules the UI relies
 /// on: gating, the person cap and expand/collapse.
@@ -49,7 +52,7 @@ void main() {
       viewModel.setPhone('9931145610');
       viewModel.setCode('12');
 
-      expect(await viewModel.verifyOtp(), isFalse);
+      expect(await viewModel.verifyOtp(), isNull);
       expect(container.read(onboardingViewModelProvider).busy, isFalse);
     });
 
@@ -58,10 +61,12 @@ void main() {
       viewModel.setPhone('9931145610');
       viewModel.setCode('123456');
 
-      expect(await viewModel.verifyOtp(), isTrue);
+      // A brand new account has no name yet, so it still goes through the name step.
+      expect(await viewModel.verifyOtp(), SplashDestination.name);
 
       viewModel.setName('  Ayush  ');
-      expect(await viewModel.saveName(), isTrue);
+      // Named but never paid — the paywall is where this one belongs.
+      expect(await viewModel.saveName(), SplashDestination.subscribe);
       // The name is trimmed on the way into the session.
       expect(FakeSession.instance.user?.name, 'Ayush');
     });
@@ -69,6 +74,40 @@ void main() {
     test('a blank name cannot be submitted', () {
       container.read(onboardingViewModelProvider.notifier).setName('   ');
       expect(container.read(onboardingViewModelProvider).canSaveName, isFalse);
+    });
+
+    // Regression: signing in again on a wiped device used to walk the user through the name
+    // step and then hard-navigate to the paywall, which quoted ₹499 because the trial had
+    // already been used. Only a cold start put them right, because only the splash asked where
+    // the user actually belonged. Every step that resolves a user now asks the same question.
+    test('a returning trial user is never sent back to the paywall', () async {
+      final onTrial = AppUser(
+        id: 'u1',
+        phone: '9931145610',
+        name: 'Ayush',
+        trialEndsAt: DateTime.now().add(const Duration(days: 1)),
+        entitled: true,
+      );
+
+      final destination = await destinationForUser(
+        user: onTrial,
+        locationService: LocationService(),
+      );
+
+      expect(destination, isNot(SplashDestination.subscribe));
+      expect(destination, isNot(SplashDestination.name));
+      // No platform channel under test, so location reads as never-asked and the permission
+      // step is the honest answer — the point is that it is on the far side of the paywall.
+      expect(destination, SplashDestination.location);
+    });
+
+    test('a named user who never paid still lands on the paywall', () async {
+      const neverPaid = AppUser(id: 'u2', phone: '9931145610', name: 'Ayush');
+
+      expect(
+        await destinationForUser(user: neverPaid, locationService: LocationService()),
+        SplashDestination.subscribe,
+      );
     });
   });
 

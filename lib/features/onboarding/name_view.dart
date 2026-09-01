@@ -34,8 +34,10 @@ class _NameViewState extends ConsumerState<NameView> {
   }
 
   Future<void> _submit() async {
-    final saved = await ref.read(onboardingViewModelProvider.notifier).saveName();
-    if (saved && mounted) context.go(Routes.subscribe);
+    final next = await ref.read(onboardingViewModelProvider.notifier).saveName();
+    // Usually the paywall, but not always: a user whose trial is still live re-entering their
+    // name after a reinstall has already paid, and must go on into the app instead.
+    if (next != null && mounted) context.go(next.route);
   }
 
   @override

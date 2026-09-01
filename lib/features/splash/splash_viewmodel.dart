@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/entitlement.dart';
+import '../../data/models/app_user.dart';
 import '../../data/pending_invite.dart';
 import '../../data/providers.dart';
 import '../../location_service.dart';
@@ -30,6 +31,36 @@ SplashDestination destinationForSession({
   return SplashDestination.home;
 }
 
+/// [destinationForSession] for a resolved [user], asking the OS about location on the way.
+///
+/// Every step that ends holding a fresh [AppUser] routes through this, so the splash, the OTP
+/// step and the name step cannot disagree about where the same user belongs. Routing by step
+/// order instead is what used to send a returning trial user to the paywall: they had already
+/// paid, and only a cold start — which did come through here — put them right.
+Future<SplashDestination> destinationForUser({
+  required AppUser? user,
+  required LocationService locationService,
+}) async {
+  // Read straight from the OS rather than from a stored flag: the user can revoke permission
+  // in Settings between launches, and a "we already asked" flag would then be wrong forever.
+  var locationAnswered = true;
+  if (user != null && user.entitled) {
+    final status = await locationService.getStatus().catchError(
+          // No platform channel (a test, or an unsupported platform) must not strand the
+          // caller on a permission screen it cannot resolve.
+          (_) => TrackingStatus.unknown,
+        );
+    locationAnswered = status.permission != LocationPermission.notRequested;
+  }
+
+  return destinationForSession(
+    signedIn: user != null,
+    hasName: user?.hasName ?? false,
+    entitled: user?.entitled ?? false,
+    locationAnswered: locationAnswered,
+  );
+}
+
 final splashDestinationProvider = FutureProvider.autoDispose<SplashDestination>((ref) async {
   // The cold-start link has to resolve before the branch, or the splash would fall through to
   // the phone screen while the invite was still arriving.
@@ -41,22 +72,8 @@ final splashDestinationProvider = FutureProvider.autoDispose<SplashDestination>(
   // launch cannot walk in on an entitlement that expired while the device had no signal.
   ref.read(entitlementProvider.notifier).set(user);
 
-  // Read straight from the OS rather than from a stored flag: the user can revoke permission
-  // in Settings between launches, and a "we already asked" flag would then be wrong forever.
-  var locationAnswered = true;
-  if (user != null && user.entitled) {
-    final status = await ref.read(locationServiceProvider).getStatus().catchError(
-          // No platform channel (a test, or an unsupported platform) must not strand the
-          // splash on a permission screen it cannot resolve.
-          (_) => TrackingStatus.unknown,
-        );
-    locationAnswered = status.permission != LocationPermission.notRequested;
-  }
-
-  return destinationForSession(
-    signedIn: user != null,
-    hasName: user?.hasName ?? false,
-    entitled: user?.entitled ?? false,
-    locationAnswered: locationAnswered,
+  return destinationForUser(
+    user: user,
+    locationService: ref.read(locationServiceProvider),
   );
 });

@@ -25,14 +25,17 @@ class _OtpViewState extends ConsumerState<OtpView> {
   final _otpController = OtpFieldController();
 
   Future<void> _submit() async {
-    final verified = await ref.read(onboardingViewModelProvider.notifier).verifyOtp();
+    final next = await ref.read(onboardingViewModelProvider.notifier).verifyOtp();
     if (!mounted) return;
-    if (verified) {
-      context.push(Routes.name);
-    } else {
+    if (next == null) {
       // The ViewModel has already dropped the code; clear the boxes to match and refocus.
       _otpController.clear();
+      return;
     }
+    // Where the *user* belongs, not the next step in the form. Someone signing in again on a
+    // wiped device already has a name and a live trial, and belongs on Home — walking them
+    // through the name step would end at the paywall asking them to pay a second time.
+    context.go(next.route);
   }
 
   Future<void> _resend() async {
