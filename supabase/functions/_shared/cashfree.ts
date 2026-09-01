@@ -100,6 +100,25 @@ async function request(
   body?: Record<string, unknown>,
   idempotencyKey?: string,
 ): Promise<Record<string, unknown>> {
+  const decoded = await requestRaw(settings, method, path, body, idempotencyKey);
+  return decoded !== null && typeof decoded === "object" && !Array.isArray(decoded)
+    ? decoded as Record<string, unknown>
+    : {};
+}
+
+/**
+ * As [request], but without assuming the response is an object.
+ *
+ * The subscription payments endpoint answers with a bare JSON array, which every other call
+ * here would silently flatten to `{}`.
+ */
+async function requestRaw(
+  settings: CashfreeSettings,
+  method: "GET" | "POST",
+  path: string,
+  body?: Record<string, unknown>,
+  idempotencyKey?: string,
+): Promise<unknown> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
 
@@ -131,7 +150,7 @@ async function request(
   }
 
   const raw = await response.text();
-  let decoded: Record<string, unknown>;
+  let decoded: unknown;
   try {
     decoded = raw ? JSON.parse(raw) : {};
   } catch {
@@ -143,8 +162,12 @@ async function request(
   }
 
   if (!response.ok) {
-    const message = String(decoded.message ?? decoded.error_description ?? "no message");
-    const code = String(decoded.code ?? decoded.type ?? "");
+    // An error body is always an object; the array shape only comes back on success.
+    const error = (decoded !== null && typeof decoded === "object" && !Array.isArray(decoded)
+      ? decoded
+      : {}) as Record<string, unknown>;
+    const message = String(error.message ?? error.error_description ?? "no message");
+    const code = String(error.code ?? error.type ?? "");
     throw new CashfreeError(
       response.status,
       UNAVAILABLE,
@@ -261,6 +284,42 @@ export function fetchSubscription(
   return request(settings, "GET", `/subscriptions/${encodeURIComponent(subscriptionId)}`);
 }
 
+/**
+ * Every charge Cashfree has attempted on a mandate.
+ *
+ * The webhook is otherwise the only route by which a debit is ever recorded, which makes a
+ * webhook that was never delivered indistinguishable from a charge that never happened — and
+ * the user pays ₹499 and loses access anyway. Asking Cashfree directly is what closes that:
+ * the reconcile sweep replays anything the ledger is missing.
+ *
+ * Returns an empty list rather than throwing when the endpoint answers with an unexpected
+ * shape; a missing payments list must not abort the status sync it is attached to.
+ */
+export async function fetchSubscriptionPayments(
+  settings: CashfreeSettings,
+  subscriptionId: string,
+): Promise<WebhookPayment[]> {
+  const decoded = await requestRaw(
+    settings,
+    "GET",
+    `/subscriptions/${encodeURIComponent(subscriptionId)}/payments`,
+  );
+
+  // Documented as a bare array, but a `{data: [...]}` envelope shows up across API versions.
+  const rows = Array.isArray(decoded)
+    ? decoded
+    : Array.isArray((decoded as Record<string, unknown>)?.data)
+    ? (decoded as Record<string, unknown>).data as unknown[]
+    : [];
+
+  return rows
+    .filter((row): row is Record<string, unknown> =>
+      row !== null && typeof row === "object" && !Array.isArray(row)
+    )
+    .map(paymentFromRow)
+    .filter((payment): payment is WebhookPayment => payment !== null);
+}
+
 export function cancelSubscription(
   settings: CashfreeSettings,
   subscriptionId: string,
@@ -318,10 +377,22 @@ export function snapshotOf(cf: Record<string, unknown>): SubscriptionSnapshot {
   };
 }
 
-/** Cashfree states in which the mandate can still charge, or still might start charging. */
+/**
+ * Cashfree states in which the mandate can still charge, or still might start charging.
+ *
+ * PAUSED belongs here: `subscription-cancel` and `subscription-start` already treat it as a
+ * live mandate, so leaving it out meant a paused subscription was accepted as live at one end
+ * and never swept by the reconcile at the other.
+ */
 export function isLiveStatus(status: string): boolean {
-  return ["INITIALIZED", "PENDING_AUTHORIZATION", "ACTIVE", "ON_HOLD", "BANK_APPROVAL_PENDING"]
-    .includes(status);
+  return [
+    "INITIALIZED",
+    "PENDING_AUTHORIZATION",
+    "ACTIVE",
+    "ON_HOLD",
+    "PAUSED",
+    "BANK_APPROVAL_PENDING",
+  ].includes(status);
 }
 
 // ---------------------------------------------------------------- webhooks
@@ -425,12 +496,26 @@ export interface WebhookPayment {
   status: string;
   paymentTime: string | null;
   failureReason: string | null;
+  /**
+   * Cashfree's own AUTH/RECURRING label, when it gave one.
+   *
+   * Only the payments endpoint carries it. Preferred over guessing from the amount, which
+   * cannot tell a ₹3 authorisation from a ₹3 refund-of-a-renewal.
+   */
+  kindHint: string | null;
   /** The untouched `data` block, kept for disputes months after the fact. */
   raw: Record<string, unknown>;
 }
 
 export function paymentFrom(payload: Record<string, unknown>): WebhookPayment | null {
-  const data = (payload.data ?? {}) as Record<string, unknown>;
+  return paymentFromRow((payload.data ?? {}) as Record<string, unknown>);
+}
+
+/**
+ * The payment fields out of one object, whether it arrived as a webhook's `data` block or as a
+ * row from the payments endpoint. Shared so the two routes cannot drift.
+ */
+function paymentFromRow(data: Record<string, unknown>): WebhookPayment | null {
   const failure = (data.failure_details ?? {}) as Record<string, unknown>;
 
   const cfPaymentId = data.cf_payment_id ?? data.payment_id;
@@ -438,6 +523,7 @@ export function paymentFrom(payload: Record<string, unknown>): WebhookPayment | 
 
   return {
     cfPaymentId: String(cfPaymentId),
+    kindHint: typeof data.payment_type === "string" ? data.payment_type.toUpperCase() : null,
     amount: numberOrNull(data.payment_amount),
     currency: typeof data.payment_currency === "string" ? data.payment_currency : "INR",
     status: typeof data.payment_status === "string" ? data.payment_status : "UNKNOWN",

@@ -16,6 +16,7 @@ import {
   cancelSubscription,
   CashfreeSettings,
   fetchSubscription,
+  fetchSubscriptionPayments,
   isLiveStatus,
   snapshotOf,
   SubscriptionSnapshot,
@@ -134,18 +135,27 @@ function updatesForRecurringSuccess(
 
 // ---------------------------------------------------------------- payments
 
+export type PaymentKind = "AUTH" | "RECURRING" | "UNKNOWN";
+
 /**
- * Classifies a charge. The event type is trusted first because it is unambiguous; the amount
- * is the fallback for a redelivery whose type we could not read.
+ * Classifies a charge, most trustworthy signal first: Cashfree's own label, then the event
+ * type, then the amount.
+ *
+ * Returns UNKNOWN rather than guessing when none of them can be read. RECURRING used to be the
+ * fallback, which meant a SUCCESS payload whose type and amount both failed to parse credited
+ * the user a paid month they had not been billed for.
  */
 export function paymentKind(
   eventType: string | null,
   amount: number | null,
   settings: CashfreeSettings,
-): "AUTH" | "RECURRING" {
+  kindHint: string | null = null,
+): PaymentKind {
+  if (kindHint === "AUTH" || kindHint === "RECURRING") return kindHint;
   if (eventType === "SUBSCRIPTION_AUTH_STATUS") return "AUTH";
   if (amount !== null && amount <= settings.trialAmount) return "AUTH";
-  return "RECURRING";
+  if (amount !== null) return "RECURRING";
+  return "UNKNOWN";
 }
 
 /**
@@ -160,7 +170,18 @@ export async function recordPayment(
   payment: WebhookPayment,
   eventType: string | null,
 ): Promise<void> {
-  const kind = paymentKind(eventType, payment.amount, settings);
+  const kind = paymentKind(eventType, payment.amount, settings, payment.kindHint);
+
+  // Read before the upsert: the upsert itself cannot say whether this charge was already
+  // known, and "already known and already SUCCESS" is the only thing standing between a
+  // redelivered webhook and a second free month.
+  const { data: prior } = await db
+    .from("subscription_payments")
+    .select("status, payment_time, created_at")
+    .eq("cf_payment_id", payment.cfPaymentId)
+    .maybeSingle();
+
+  const alreadyCredited = prior?.status === "SUCCESS";
 
   const { error } = await db.from("subscription_payments").upsert({
     subscription_pk: subscription.id,
@@ -183,7 +204,14 @@ export async function recordPayment(
     failure_reason: payment.failureReason,
   }).eq("id", subscription.id);
 
+  // UNKNOWN never credits: it means we could not tell an authorisation from a renewal, and
+  // guessing in the user's favour is how an unreadable payload becomes a free month.
   if (kind !== "RECURRING" || payment.status !== "SUCCESS") return;
+
+  // A charge that has already been counted must not be counted again. Without this, a webhook
+  // whose first attempt failed after the upsert — or any redelivery Cashfree retries — pushed
+  // current_period_end another month forward every time it ran.
+  if (alreadyCredited) return;
 
   const { data: user } = await db
     .from("users")
@@ -193,10 +221,55 @@ export async function recordPayment(
 
   if (!user) return;
 
+  // Anchored to when the money actually moved. Falling back to "now" on a payload with no
+  // payment_time is only safe because the guard above means this runs at most once per charge.
+  const paidAt = payment.paymentTime ??
+    (prior?.payment_time as string | null) ??
+    (prior?.created_at as string | null);
+
   await db
     .from("users")
-    .update(updatesForRecurringSuccess(asUserRow(user), payment.paymentTime))
+    .update(updatesForRecurringSuccess(asUserRow(user), paidAt))
     .eq("user_id", subscription.user_id);
+}
+
+/**
+ * Replays any charge Cashfree has on record that our ledger is missing.
+ *
+ * The webhook is otherwise the only way a debit is ever recorded, so a webhook that was never
+ * delivered — an endpoint not yet registered, an outage, a signature mismatch — looks exactly
+ * like a charge that never happened, and the user is billed and then locked out anyway. This is
+ * what makes that recoverable. Idempotent: [recordPayment] ignores charges already counted.
+ *
+ * Best-effort. A payments endpoint that is unreachable or has changed shape must not take down
+ * the status sync it hangs off.
+ */
+export async function reconcilePayments(
+  db: SupabaseClient,
+  settings: CashfreeSettings,
+  subscription: SubscriptionRow,
+): Promise<void> {
+  let payments: WebhookPayment[];
+  try {
+    payments = await fetchSubscriptionPayments(settings, subscription.subscription_id);
+  } catch (error) {
+    console.error(`could not list payments for ${subscription.subscription_id}: ${error}`);
+    return;
+  }
+
+  // Oldest first, so a month is credited from the earliest debit forward and `laterOf` in
+  // updatesForRecurringSuccess never has to walk backwards.
+  payments.sort((a, b) =>
+    new Date(a.paymentTime ?? 0).getTime() - new Date(b.paymentTime ?? 0).getTime()
+  );
+
+  for (const payment of payments) {
+    try {
+      await recordPayment(db, settings, subscription, payment, null);
+    } catch (error) {
+      console.error(`could not record payment ${payment.cfPaymentId}: ${error}`);
+    }
+  }
 }
 
 // ---------------------------------------------------------------- sync
@@ -218,6 +291,7 @@ export async function syncSubscription(
   settings: CashfreeSettings,
   subscriptionId: string,
   depth = 0,
+  withPayments = false,
 ): Promise<SyncResult> {
   const cf = await fetchSubscription(settings, subscriptionId);
   const snapshot = snapshotOf(cf);
@@ -257,9 +331,15 @@ export async function syncSubscription(
   if (writeError) {
     // The one-live-mandate index fired: this user already has a different ACTIVE row.
     if (writeError.code === UNIQUE_VIOLATION && depth === 0) {
-      return await resolveDuplicateActive(db, settings, row, subscriptionId);
+      return await resolveDuplicateActive(db, settings, row, subscriptionId, withPayments);
     }
     throw new Error(`subscriptions update failed: ${writeError.message}`);
+  }
+
+  // Before the user is read, so a debit recovered here is already reflected in the row that
+  // userUpdatesFor then reasons about.
+  if (withPayments) {
+    await reconcilePayments(db, settings, { ...row, ...patch } as SubscriptionRow);
   }
 
   const { data: userRow, error: userError } = await db
@@ -295,6 +375,7 @@ async function resolveDuplicateActive(
   settings: CashfreeSettings,
   row: SubscriptionRow,
   subscriptionId: string,
+  withPayments: boolean,
 ): Promise<SyncResult> {
   // limit(1), not maybeSingle() alone: the partial unique index should make more than one
   // impossible, but this is the recovery path for exactly the case where an invariant broke.
@@ -318,7 +399,7 @@ async function resolveDuplicateActive(
         .from("subscriptions")
         .update({ status: refreshed.status, raw: refreshed.raw })
         .eq("id", other.id);
-      return await syncSubscription(db, settings, subscriptionId, 1);
+      return await syncSubscription(db, settings, subscriptionId, 1, withPayments);
     }
 
     console.error(
@@ -342,7 +423,7 @@ async function resolveDuplicateActive(
       .eq("id", row.id);
   }
 
-  return await syncSubscription(db, settings, subscriptionId, 1);
+  return await syncSubscription(db, settings, subscriptionId, 1, withPayments);
 }
 
 /** The user's most recent mandate attempt, live or not. Null for a user who never started one. */

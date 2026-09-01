@@ -121,7 +121,15 @@ Deno.serve(async (req) => {
       .maybeSingle();
 
     if (prior?.processed_at) return ok({ duplicate: true });
-    eventId = prior?.id as number | undefined;
+
+    // Seen before but never finished, and we cannot even find the row to mark. Processing now
+    // would run the money path with no way to record that it ran, so every retry would run it
+    // again. Fail instead and let Cashfree redeliver into a state that can be recorded.
+    if (prior?.id == null) {
+      console.error(`payment_events conflict on ${key} but no row to resume`);
+      return new Response("could not record event", { status: 500, headers: corsHeaders });
+    }
+    eventId = prior.id as number;
   }
 
   if (!verified) {

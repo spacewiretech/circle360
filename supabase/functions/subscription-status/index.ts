@@ -6,6 +6,7 @@ import {
   asUserRow,
   entitlementPayload,
   graceHoursFrom,
+  isEntitled,
   USER_COLUMNS,
 } from "../_shared/entitlement.ts";
 import { latestSubscription, syncSubscription } from "../_shared/subscription_sync.ts";
@@ -37,9 +38,21 @@ Deno.serve(async (req) => {
   const subscription = await latestSubscription(db, userId);
 
   if (subscription && !TERMINAL.includes(subscription.status)) {
+    // Pull the payments list only when the stored state says this user is about to be turned
+    // away. That is exactly the case a missed webhook produces — debited by Cashfree, still
+    // `trial` here — and it keeps the extra call off the ordinary foreground poll, which runs
+    // on every app resume.
+    const { data: stored } = await db
+      .from("users")
+      .select(USER_COLUMNS)
+      .eq("user_id", userId)
+      .maybeSingle();
+
+    const blocked = !stored || !isEntitled(asUserRow(stored), graceHours);
+
     try {
       const settings = cashfreeSettings(config);
-      await syncSubscription(db, settings, subscription.subscription_id);
+      await syncSubscription(db, settings, subscription.subscription_id, 0, blocked);
     } catch (error) {
       // Logged, not surfaced. The stored state below is still a correct answer, just possibly
       // a few minutes stale, and the webhook or the nightly sweep will catch up.

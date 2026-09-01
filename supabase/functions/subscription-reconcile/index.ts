@@ -23,7 +23,7 @@ import { syncSubscription } from "../_shared/subscription_sync.ts";
 const BATCH = 100;
 
 /** Cashfree states in which a schedule can still fire, so drift is worth checking for. */
-const LIVE = ["ACTIVE", "ON_HOLD", "PENDING_AUTHORIZATION", "INITIALIZED"];
+const LIVE = ["ACTIVE", "ON_HOLD", "PAUSED", "PENDING_AUTHORIZATION", "INITIALIZED"];
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
@@ -101,7 +101,10 @@ Deno.serve(async (req) => {
 
   for (const id of ids) {
     try {
-      await syncSubscription(db, settings, id);
+      // withPayments: this sweep exists for the case where a webhook never arrived, and the
+      // subscription snapshot alone cannot tell us a ₹499 was taken. Only the payments list
+      // can, and without it a debited user still lapses.
+      await syncSubscription(db, settings, id, 0, true);
       synced++;
     } catch (err) {
       // One bad subscription must not abort the batch — the rest still need reconciling.

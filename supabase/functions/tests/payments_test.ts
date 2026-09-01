@@ -14,6 +14,7 @@ import {
   addMonths,
   CashfreeSettings,
   dedupeKey,
+  isLiveStatus,
   paymentFrom,
   snapshotOf,
   subscriptionIdsFrom,
@@ -265,7 +266,35 @@ Deno.test("the amount decides when the event type is unreadable", () => {
   // debit would hand out a free month.
   assertEquals(paymentKind(null, 3, settings), "AUTH");
   assertEquals(paymentKind(null, 499, settings), "RECURRING");
-  assertEquals(paymentKind(null, null, settings), "RECURRING");
+});
+
+Deno.test("an unreadable charge is UNKNOWN rather than a free month", () => {
+  // This used to fall through to RECURRING, so a SUCCESS payload whose type and amount both
+  // failed to parse credited a paid month nobody had been billed for.
+  assertEquals(paymentKind(null, null, settings), "UNKNOWN");
+});
+
+Deno.test("Cashfree's own payment_type outranks the amount", () => {
+  // A ₹3 row labelled RECURRING is a real renewal on a discounted plan; a ₹499 row labelled
+  // AUTH is an authorisation. The label is the only signal that can tell those apart.
+  assertEquals(paymentKind(null, 3, settings, "RECURRING"), "RECURRING");
+  assertEquals(paymentKind("SUBSCRIPTION_PAYMENT_SUCCESS", 499, settings, "AUTH"), "AUTH");
+});
+
+Deno.test("the payments endpoint's payment_type is carried through as a hint", () => {
+  const payment = paymentFrom({
+    data: { cf_payment_id: 1, payment_amount: 499, payment_type: "recurring" },
+  });
+
+  assertEquals(payment?.kindHint, "RECURRING");
+  assertEquals(paymentKind(null, null, settings, payment?.kindHint ?? null), "RECURRING");
+});
+
+Deno.test("PAUSED counts as a live mandate", () => {
+  // subscription-cancel and subscription-start both accept it, so a reconcile that skipped it
+  // left a paused mandate that nothing ever swept.
+  assertEquals(isLiveStatus("PAUSED"), true);
+  assertEquals(isLiveStatus("CANCELLED"), false);
 });
 
 // ---------------------------------------------------------------- time
