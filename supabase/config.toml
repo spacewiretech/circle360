@@ -1,0 +1,77 @@
+project_id = "symwrytqyhyxlcjaubru"
+
+[api]
+enabled = true
+port = 54321
+schemas = ["public"]
+extra_search_path = ["public", "extensions"]
+# Ceiling on rows a single PostgREST request can return, so a bad query cannot pull the table.
+max_rows = 1000
+
+[db]
+port = 54322
+major_version = 15
+
+[studio]
+enabled = true
+port = 54323
+
+# Supabase Auth is unused: the app verifies phone numbers through Fast2SMS and the Edge
+# Functions issue their own session tokens.
+[auth]
+enabled = false
+
+# verify_jwt = false because these are called with the anon key before any session exists.
+# Each function does its own validation: send/resend/verify are rate limited per mobile,
+# and me/update-profile require a bearer session token.
+[functions.send-otp]
+verify_jwt = false
+
+[functions.resend-otp]
+verify_jwt = false
+
+[functions.verify-otp]
+verify_jwt = false
+
+[functions.me]
+verify_jwt = false
+
+[functions.update-profile]
+verify_jwt = false
+
+# Payments. subscription-* require a bearer session token and derive the user from it, so no
+# request can name an account other than its own.
+[functions.subscription-start]
+verify_jwt = false
+
+[functions.subscription-status]
+verify_jwt = false
+
+[functions.subscription-cancel]
+verify_jwt = false
+
+# Called by Cashfree, which cannot send a Supabase apikey header — so this one must be publicly
+# invokable. It authenticates the caller by verifying the HMAC signature over the raw body
+# instead, and refuses to process anything that does not verify.
+[functions.cashfree-webhook]
+verify_jwt = false
+
+# Called by pg_cron, authenticated with app_config.reconcile_secret.
+[functions.subscription-reconcile]
+verify_jwt = false
+
+# Location sharing. All require a bearer session token and derive the caller from it, so no
+# request can read or write another account's people or position.
+[functions.people]
+verify_jwt = false
+
+[functions.add-person]
+verify_jwt = false
+
+[functions.respond-request]
+verify_jwt = false
+
+# Called from Kotlin/Swift every 10s per device, long after the Flutter engine is gone. Its
+# 401/403 responses are what tell the native uploader to stop.
+[functions.ingest-location]
+verify_jwt = false
