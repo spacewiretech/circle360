@@ -1,4 +1,4 @@
-package com.example.loc_360
+package com.spacewire.circle360
 
 import android.content.Context
 import android.location.Location

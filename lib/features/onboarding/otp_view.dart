@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:loc_360/app/assets.dart';
 
 import '../../app/router.dart';
 import '../../app/theme/app_colors.dart';
@@ -16,6 +17,8 @@ import 'widgets/onboarding_scaffold.dart';
 /// has no way forward.
 class OtpView extends ConsumerStatefulWidget {
   const OtpView({super.key});
+
+  static const _heroWidthRatio = 266 / 0.9591 / 412;
 
   @override
   ConsumerState<OtpView> createState() => _OtpViewState();
@@ -47,8 +50,15 @@ class _OtpViewState extends ConsumerState<OtpView> {
   Widget build(BuildContext context) {
     final state = ref.watch(onboardingViewModelProvider);
     final viewModel = ref.read(onboardingViewModelProvider.notifier);
+    final heroWidth = MediaQuery.sizeOf(context).width * OtpView._heroWidthRatio;
 
     return OnboardingScaffold(
+      hero: Image.asset(
+        Img.inviteHero,
+        width: heroWidth,
+        // Height follows the asset's own aspect; the sheet crops whatever hangs below.
+        fit: BoxFit.fitWidth,
+      ),
       prompt: state.phone.isEmpty
           ? 'Please enter verification code'
           : 'Enter the code sent to +91 ${state.phone}',

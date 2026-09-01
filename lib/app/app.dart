@@ -22,7 +22,7 @@ class Loc360App extends ConsumerWidget {
     });
 
     return MaterialApp.router(
-      title: 'Loc 360',
+      title: 'Circle 360',
       debugShowCheckedModeBanner: false,
       theme: buildAppTheme(),
       routerConfig: appRouter,

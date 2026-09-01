@@ -1,4 +1,4 @@
-package com.example.loc_360
+package com.spacewire.circle360
 
 import android.app.AlarmManager
 import android.app.Notification
@@ -35,13 +35,13 @@ class LocationTrackingService : Service() {
         private const val CHANNEL_ID = "loc360_tracking"
         private const val NOTIFICATION_ID = 4201
 
-        const val ACTION_START = "com.example.loc_360.START"
-        const val ACTION_STOP = "com.example.loc_360.STOP"
+        const val ACTION_START = "com.spacewire.circle360.START"
+        const val ACTION_STOP = "com.spacewire.circle360.STOP"
 
         private const val INTERVAL_MS = 10_000L
 
         /** Broadcast so the Flutter UI can live-update while it happens to be alive. */
-        const val BROADCAST_UPDATE = "com.example.loc_360.LOCATION_UPDATE"
+        const val BROADCAST_UPDATE = "com.spacewire.circle360.LOCATION_UPDATE"
 
         fun start(context: Context) {
             val intent = Intent(context, LocationTrackingService::class.java)
@@ -206,7 +206,7 @@ class LocationTrackingService : Service() {
 
         return builder
             .setContentTitle("Location tracking active")
-            .setContentText("Sending your location every 10 seconds")
+            .setContentText("Sending your location")
             .setSmallIcon(android.R.drawable.ic_menu_mylocation)
             .setContentIntent(openApp)
             .setOngoing(true)

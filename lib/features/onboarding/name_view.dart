@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:loc_360/app/assets.dart';
 
 import '../../app/router.dart';
 import '../../widgets/phone_field.dart';
@@ -10,6 +11,8 @@ import 'widgets/onboarding_scaffold.dart';
 /// Figma `12310:11274` — step 3 of 3, then straight to the paywall.
 class NameView extends ConsumerStatefulWidget {
   const NameView({super.key});
+
+  static const _heroWidthRatio = 266 / 0.9591 / 412;
 
   @override
   ConsumerState<NameView> createState() => _NameViewState();
@@ -43,8 +46,15 @@ class _NameViewState extends ConsumerState<NameView> {
   @override
   Widget build(BuildContext context) {
     final state = ref.watch(onboardingViewModelProvider);
+    final heroWidth = MediaQuery.sizeOf(context).width * NameView._heroWidthRatio;
 
     return OnboardingScaffold(
+      hero: Image.asset(
+        Img.inviteHero,
+        width: heroWidth,
+        // Height follows the asset's own aspect; the sheet crops whatever hangs below.
+        fit: BoxFit.fitWidth,
+      ),
       prompt: 'Please enter your name',
       field: TextFieldBox(
         controller: _controller,

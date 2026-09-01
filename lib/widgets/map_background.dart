@@ -53,7 +53,7 @@ class MapBackground extends StatelessWidget {
       children: [
         TileLayer(
           urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-          userAgentPackageName: 'com.example.loc_360',
+          userAgentPackageName: 'com.spacewire.circle360',
           tileProvider: NetworkTileProvider(),
         ),
         if (me != null)

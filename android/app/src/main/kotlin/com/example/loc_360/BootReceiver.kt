@@ -1,4 +1,4 @@
-package com.example.loc_360
+package com.spacewire.circle360
 
 import android.Manifest
 import android.content.BroadcastReceiver
@@ -19,7 +19,7 @@ class BootReceiver : BroadcastReceiver() {
 
     companion object {
         private const val TAG = "Loc360"
-        const val ACTION_RESTART = "com.example.loc_360.RESTART_SERVICE"
+        const val ACTION_RESTART = "com.spacewire.circle360.RESTART_SERVICE"
     }
 
     override fun onReceive(context: Context, intent: Intent) {

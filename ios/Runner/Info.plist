@@ -7,7 +7,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>Loc 360</string>
+	<string>Circle 360</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -27,11 +27,11 @@
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>Loc 360 uses your location to show tracking status and send location updates while you have the app open.</string>
+	<string>Circle 360 uses your location to show tracking status and send location updates while you have the app open.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-	<string>Loc 360 needs "Always" access so it can keep sending your location every 10 seconds while the app is in the background or closed.</string>
+	<string>Circle 360 needs "Always" access.</string>
 	<key>NSLocationAlwaysUsageDescription</key>
-	<string>Loc 360 needs "Always" access so it can keep sending your location every 10 seconds while the app is in the background or closed.</string>
+	<string>Circle 360 needs "Always" access.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>location</string>
@@ -83,7 +83,7 @@
 			<key>CFBundleTypeRole</key>
 			<string>Editor</string>
 			<key>CFBundleURLName</key>
-			<string>com.example.loc360.invite</string>
+			<string>com.spacewire.circle360.invite</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
 				<string>loc360</string>

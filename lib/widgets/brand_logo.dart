@@ -22,17 +22,20 @@ class LogoPin extends StatelessWidget {
 
 /// The "Loc360" wordmark. 92x22 inside the sheets, 121x29 on the splash.
 class LogoWordmark extends StatelessWidget {
-  const LogoWordmark({super.key, this.height = 22});
+  const LogoWordmark({super.key, this.height = 26});
 
   final double height;
 
   @override
   Widget build(BuildContext context) {
-    return Image.asset(
-      Img.logoWordmark,
-      height: height,
-      width: height * 121 / 29,
-      fit: BoxFit.contain,
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6.0),
+      child: Image.asset(
+        Img.logoWordmark,
+        height: height,
+        width: height * 121 / 29,
+        fit: BoxFit.contain,
+      ),
     );
   }
 }

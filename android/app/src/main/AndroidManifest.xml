@@ -20,7 +20,7 @@
     <uses-feature android:name="android.hardware.location.gps" android:required="false"/>
 
     <application
-        android:label="loc_360"
+        android:label="Circle 360"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity

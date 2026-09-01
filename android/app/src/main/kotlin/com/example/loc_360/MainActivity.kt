@@ -1,4 +1,4 @@
-package com.example.loc_360
+package com.spacewire.circle360
 
 import android.Manifest
 import android.content.BroadcastReceiver

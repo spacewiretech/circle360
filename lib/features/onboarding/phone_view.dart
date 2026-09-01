@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:loc_360/app/assets.dart';
 
 import '../../app/router.dart';
 import '../../widgets/phone_field.dart';
@@ -10,6 +11,8 @@ import 'widgets/onboarding_scaffold.dart';
 /// Figma `12310:11223` — step 1 of 3.
 class PhoneView extends ConsumerStatefulWidget {
   const PhoneView({super.key});
+
+  static const _heroWidthRatio = 266 / 0.9591 / 412;
 
   @override
   ConsumerState<PhoneView> createState() => _PhoneViewState();
@@ -47,7 +50,14 @@ class _PhoneViewState extends ConsumerState<PhoneView> {
         ? 'Enter a valid Indian mobile number.'
         : null;
 
-    return OnboardingScaffold(
+    final heroWidth = MediaQuery.sizeOf(context).width * PhoneView._heroWidthRatio;
+
+    return OnboardingScaffold(hero: Image.asset(
+      Img.inviteHero,
+      width: heroWidth,
+      // Height follows the asset's own aspect; the sheet crops whatever hangs below.
+      fit: BoxFit.fitWidth,
+    ),
       prompt: 'Please enter your number',
       field: PhoneField(
         controller: _controller,

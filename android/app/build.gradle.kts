@@ -5,7 +5,7 @@ plugins {
 }
 
 android {
-    namespace = "com.example.loc_360"
+    namespace = "com.spacewire.circle360"
     // Pinned above flutter.compileSdkVersion (36) because flutter_secure_storage's AAR metadata
     // requires 37 or later, and the build fails outright without it. Compiling against a newer
     // SDK is backward compatible and independent of targetSdk, which still follows Flutter.
@@ -19,7 +19,7 @@ android {
 
     defaultConfig {
         // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
-        applicationId = "com.example.loc_360"
+        applicationId = "com.spacewire.circle360"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion

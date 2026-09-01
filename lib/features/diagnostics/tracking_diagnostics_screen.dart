@@ -157,7 +157,7 @@ class _TrackingBanner extends StatelessWidget {
           const SizedBox(height: 4),
           Text(
             isTracking
-                ? 'Sending your location every 10 seconds'
+                ? 'Sending your location'
                 : 'Grant location permission to begin',
             style: Theme.of(context).textTheme.bodyMedium,
             textAlign: TextAlign.center,
