@@ -83,6 +83,43 @@ class TrackingStatus {
       ? null
       : DateTime.fromMillisecondsSinceEpoch((value as num).toInt());
 
+  /// Value equality, because native pushes a fresh snapshot on every fix.
+  ///
+  /// Riverpod's `updateShouldNotify` is `!identical`, so without this every push counts as a
+  /// change and rebuilds the whole Home screen every 10 seconds whether anything moved or not.
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is TrackingStatus &&
+          other.permission == permission &&
+          other.isTracking == isTracking &&
+          other.latitude == latitude &&
+          other.longitude == longitude &&
+          other.accuracy == accuracy &&
+          other.lastFixAt == lastFixAt &&
+          other.lastSuccessAt == lastSuccessAt &&
+          other.successCount == successCount &&
+          other.failureCount == failureCount &&
+          other.lastError == lastError &&
+          other.batteryOptimized == batteryOptimized &&
+          other.uploadConfigured == uploadConfigured;
+
+  @override
+  int get hashCode => Object.hash(
+        permission,
+        isTracking,
+        latitude,
+        longitude,
+        accuracy,
+        lastFixAt,
+        lastSuccessAt,
+        successCount,
+        failureCount,
+        lastError,
+        batteryOptimized,
+        uploadConfigured,
+      );
+
   factory TrackingStatus.fromMap(Map<Object?, Object?> map) => TrackingStatus(
         permission: LocationPermission.parse(map['permission'] as String?),
         isTracking: map['isTracking'] as bool? ?? false,

@@ -131,5 +131,12 @@
             <action android:name="android.intent.action.VIEW"/>
             <data android:scheme="upi"/>
         </intent>
+
+        <!-- One-Tap Call hands the number to the dialer. Without this the platform hides every
+             dialer from us on Android 11+, and url_launcher can see nothing to open. -->
+        <intent>
+            <action android:name="android.intent.action.DIAL"/>
+            <data android:scheme="tel"/>
+        </intent>
     </queries>
 </manifest>

@@ -98,6 +98,8 @@
 	     in step if the pod is upgraded. The loc360 scheme above already covers the return_url. -->
 	<key>LSApplicationQueriesSchemes</key>
 	<array>
+		<!-- One-Tap Call. `tel:` opens regardless, but canLaunchUrl answers false without this. -->
+		<string>tel</string>
 		<string>phonepe</string>
 		<string>tez</string>
 		<string>paytmmp</string>

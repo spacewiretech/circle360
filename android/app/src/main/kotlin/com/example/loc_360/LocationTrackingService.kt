@@ -40,6 +40,25 @@ class LocationTrackingService : Service() {
 
         private const val INTERVAL_MS = 10_000L
 
+        /**
+         * How far the device has to move before its position is worth sending again.
+         *
+         * Fixes keep arriving every [INTERVAL_MS] — the map's own "you are here" marker and the
+         * status strip depend on that — but a phone on a desk has nothing new to tell the
+         * backend, and was posting ~360 times an hour to say so.
+         */
+        private const val MIN_UPLOAD_METRES = 15f
+
+        /**
+         * Upload anyway after this long, however still the device has been.
+         *
+         * Freshness is judged on the server's `updated_at`, so silence is indistinguishable from
+         * a phone that is switched off — without this, everyone sitting still would go dark.
+         * Must stay below `_freshFor` in `tracked_person.dart`, and match `heartbeat` in
+         * `LocationTracker.swift`.
+         */
+        private const val HEARTBEAT_MS = 15 * 60 * 1000L
+
         /** Broadcast so the Flutter UI can live-update while it happens to be alive. */
         const val BROADCAST_UPDATE = "com.spacewire.circle360.LOCATION_UPDATE"
 
@@ -62,6 +81,14 @@ class LocationTrackingService : Service() {
 
     private lateinit var fusedClient: FusedLocationProviderClient
     private var callback: LocationCallback? = null
+
+    /**
+     * Bypasses the distance gate for the first fix after a start.
+     *
+     * Someone who just turned sharing on — or came back after a reboot — should appear to their
+     * family straight away, not once they have walked 15 metres.
+     */
+    private var forceNextUpload = true
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -99,6 +126,7 @@ class LocationTrackingService : Service() {
         if (callback != null) return // already running; a duplicate start is a no-op
 
         TrackingState.setTracking(this, true)
+        forceNextUpload = true
 
         val request = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, INTERVAL_MS)
             .setMinUpdateIntervalMillis(INTERVAL_MS)
@@ -124,8 +152,15 @@ class LocationTrackingService : Service() {
 
     private fun onNewFix(location: Location) {
         Log.d(TAG, "fix ${location.latitude},${location.longitude} ±${location.accuracy}m")
+        // Recorded and broadcast unconditionally: the gate below is about what leaves the
+        // device, not about what the device itself knows. Skipping these would freeze the map's
+        // own marker and the "last fix" line on the diagnostics screen.
         TrackingState.recordFix(this, location)
-        LocationUploader.upload(this, location)
+
+        if (shouldUpload(location)) {
+            forceNextUpload = false
+            LocationUploader.upload(this, location)
+        }
 
         sendBroadcast(
             Intent(BROADCAST_UPDATE)
@@ -134,6 +169,36 @@ class LocationTrackingService : Service() {
                 .putExtra("longitude", location.longitude)
                 .putExtra("accuracy", location.accuracy)
         )
+    }
+
+    /**
+     * Whether this fix is worth a network call: moved far enough, or quiet for long enough.
+     *
+     * Note this only ever filters the existing [INTERVAL_MS] cadence — it can reduce the number
+     * of uploads, never add one.
+     */
+    private fun shouldUpload(location: Location): Boolean {
+        if (forceNextUpload) return true
+
+        // Nothing sent yet this session, so there is nothing to compare against.
+        val sent = TrackingState.lastSent(this) ?: return true
+
+        val since = System.currentTimeMillis() - sent.at
+        if (since >= HEARTBEAT_MS) return true
+
+        val results = FloatArray(1)
+        Location.distanceBetween(
+            sent.latitude,
+            sent.longitude,
+            location.latitude,
+            location.longitude,
+            results,
+        )
+        val moved = results[0]
+        if (moved >= MIN_UPLOAD_METRES) return true
+
+        Log.d(TAG, "upload skipped — moved ${moved.toInt()}m, ${since / 1000}s since last")
+        return false
     }
 
     private fun stopTracking() {

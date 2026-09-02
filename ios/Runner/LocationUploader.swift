@@ -67,6 +67,8 @@ enum LocationUploader {
             switch code {
             case 200...299:
                 TrackingState.recordUploadSuccess()
+                // Only now does this position become the one the gate measures from.
+                TrackingState.recordSent(location)
                 NSLog("Loc360: POST \(code) ok")
 
             // The session was revoked or the subscription lapsed. Either way this device has no

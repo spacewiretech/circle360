@@ -129,8 +129,14 @@ class _HomeViewState extends ConsumerState<HomeView> with WidgetsBindingObserver
 
     // Opening a card pans the map onto that person and lifts the sheet far enough for the
     // action row to show, as in the expanded Figma frame.
-    ref.listen(homeViewModelProvider.select((s) => s.expanded), (_, person) {
-      final position = person?.position;
+    //
+    // Keyed on the id, not the person: this fires an animation and takes the map away from the
+    // user, so it has to run on "a card was opened" and nothing else. Selecting the person
+    // instead re-ran it on every poll — re-centring the map, resetting the zoom, and dragging
+    // the sheet back up from wherever the user had put it, twice a minute.
+    ref.listen(homeViewModelProvider.select((s) => s.expandedId), (previous, id) {
+      if (id == null || id == previous) return;
+      final position = ref.read(homeViewModelProvider).expanded?.position;
       if (position == null) return;
       _map.move(position, 16);
       if (_sheet.isAttached && _sheet.size < _expandedSheetSize) {

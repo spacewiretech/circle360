@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../data/dialer.dart';
 import '../../data/models/emergency_contact.dart';
 import '../../data/providers.dart';
 import '../../data/repositories/emergency_repository.dart';
@@ -65,9 +66,12 @@ class EmergencyViewModel extends Notifier<EmergencyState> {
     state = state.copyWith(contacts: contacts, message: '${contact.name} removed');
   }
 
-  /// No dialer wired up yet — the confirmation stands in for the call.
-  void call(EmergencyContact contact) =>
-      state = state.copyWith(message: 'Calling ${contact.name} on ${contact.phone}');
+  /// Hands the number to the phone's dialer. Silent on success — the dialer coming up is the
+  /// confirmation, and a SnackBar underneath it would only be read after the call.
+  Future<void> call(EmergencyContact contact) async {
+    final error = await dialNumber(contact.phone);
+    if (error != null) state = state.copyWith(message: error);
+  }
 
   void consumeMessage() => state = state.copyWith(clearMessage: true);
 }

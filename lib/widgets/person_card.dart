@@ -101,7 +101,7 @@ class PersonCard extends StatelessWidget {
                   mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    for (final action in PersonAction.values)
+                    for (final action in PersonAction.available)
                       ActionTile(action: action, onTap: () => onAction(action)),
                   ],
                 ),

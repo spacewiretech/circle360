@@ -23,6 +23,21 @@ final class LocationTracker: NSObject, CLLocationManagerDelegate {
 
     private let interval: TimeInterval = 10
 
+    /// How far the device has to move before its position is worth sending again.
+    ///
+    /// Fixes keep arriving on the delegate regardless — the map's own "you are here" marker
+    /// depends on that — but a phone on a desk has nothing new to tell the backend, and was
+    /// posting ~360 times an hour to say so.
+    private let minUploadMetres: CLLocationDistance = 15
+
+    /// Upload anyway after this long, however still the device has been.
+    ///
+    /// Freshness is judged on the server's `updated_at`, so silence is indistinguishable from a
+    /// phone that is switched off — without this, everyone sitting still would go dark. Must
+    /// stay below `_freshFor` in `tracked_person.dart`, and match `HEARTBEAT_MS` in
+    /// `LocationTrackingService.kt`.
+    private let heartbeat: TimeInterval = 15 * 60
+
     /// Pushed to the Flutter EventChannel while the UI happens to be alive.
     var onUpdate: (() -> Void)?
 
@@ -126,10 +141,30 @@ final class LocationTracker: NSObject, CLLocationManagerDelegate {
         uploadTimer = timer
     }
 
-    private func uploadLatest() {
+    /// - Parameter force: skips the distance gate, for the first fix after tracking starts.
+    private func uploadLatest(force: Bool = false) {
         guard TrackingState.isTracking, let location = latestLocation else { return }
+        guard force || shouldUpload(location) else { return }
         NSLog("Loc360: uploading \(location.coordinate.latitude),\(location.coordinate.longitude) ±\(location.horizontalAccuracy)m")
         LocationUploader.upload(location)
+    }
+
+    /// Whether this fix is worth a network call: moved far enough, or quiet for long enough.
+    ///
+    /// Note this only ever filters the existing timer cadence — it can reduce the number of
+    /// uploads, never add one.
+    private func shouldUpload(_ location: CLLocation) -> Bool {
+        // Nothing sent yet this session, so there is nothing to compare against.
+        guard let sent = TrackingState.lastSent else { return true }
+
+        let since = Date().timeIntervalSince(sent.at)
+        if since >= heartbeat { return true }
+
+        let moved = location.distance(from: sent.location)
+        if moved >= minUploadMetres { return true }
+
+        NSLog("Loc360: upload skipped — moved \(Int(moved))m, \(Int(since))s since last")
+        return false
     }
 
     func stop() {
@@ -165,8 +200,10 @@ final class LocationTracker: NSObject, CLLocationManagerDelegate {
 
         NSLog("Loc360: fix \(location.coordinate.latitude),\(location.coordinate.longitude) ±\(location.horizontalAccuracy)m")
 
-        // Don't make the user wait a full interval for the first upload after starting.
-        if isFirstFix { uploadLatest() }
+        // Don't make the user wait a full interval for the first upload after starting — and
+        // don't make them walk 15 metres for it either, hence `force`. Someone who just turned
+        // sharing on should appear to their family straight away.
+        if isFirstFix { uploadLatest(force: true) }
     }
 
     func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {

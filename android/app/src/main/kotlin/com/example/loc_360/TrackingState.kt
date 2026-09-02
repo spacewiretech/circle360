@@ -25,6 +25,12 @@ object TrackingState {
     private const val KEY_LAST_ACCURACY = "last_accuracy"
     private const val KEY_LAST_FIX_AT = "last_fix_at"
     private const val KEY_LAST_SUCCESS_AT = "last_success_at"
+    // The last position actually accepted by the backend, which is what the upload gate
+    // measures against. Deliberately separate from the last *fix*, which is written on every
+    // fix and so would always be zero metres away.
+    private const val KEY_SENT_LAT = "sent_lat"
+    private const val KEY_SENT_LNG = "sent_lng"
+    private const val KEY_SENT_AT = "sent_at"
     private const val KEY_SUCCESS_COUNT = "success_count"
     private const val KEY_FAILURE_COUNT = "failure_count"
     private const val KEY_LAST_ERROR = "last_error"
@@ -68,6 +74,12 @@ object TrackingState {
             .remove(KEY_ENDPOINT)
             .remove(KEY_API_KEY)
             .remove(KEY_TOKEN)
+            // Dropped with the credential: the next sign-in is a different session, and possibly
+            // a different person on a shared handset. Leaving it would let the gate suppress
+            // their first upload for a whole heartbeat.
+            .remove(KEY_SENT_LAT)
+            .remove(KEY_SENT_LNG)
+            .remove(KEY_SENT_AT)
             .apply()
     }
 
@@ -89,6 +101,32 @@ object TrackingState {
             // Floats lose precision past ~7 digits, so keep the authoritative values as strings.
             .putString("last_lat_exact", location.latitude.toString())
             .putString("last_lng_exact", location.longitude.toString())
+            .apply()
+    }
+
+    /** What the backend last accepted, and when. Null until the first successful upload. */
+    data class Sent(val latitude: Double, val longitude: Double, val at: Long)
+
+    fun lastSent(context: Context): Sent? {
+        val p = prefs(context)
+        val lat = p.getString(KEY_SENT_LAT, null)?.toDoubleOrNull() ?: return null
+        val lng = p.getString(KEY_SENT_LNG, null)?.toDoubleOrNull() ?: return null
+        return Sent(lat, lng, p.getLong(KEY_SENT_AT, 0L))
+    }
+
+    /**
+     * Records a position the backend accepted.
+     *
+     * Called only on success, so a failed POST leaves the gate open and the next fix retries
+     * rather than being suppressed until the heartbeat comes round.
+     */
+    fun recordSent(context: Context, location: Location) {
+        prefs(context).edit()
+            // Strings for the same reason as the last fix: a Float loses precision past ~7
+            // digits, which is tens of metres — enough to corrupt the gate's own measurement.
+            .putString(KEY_SENT_LAT, location.latitude.toString())
+            .putString(KEY_SENT_LNG, location.longitude.toString())
+            .putLong(KEY_SENT_AT, System.currentTimeMillis())
             .apply()
     }
 

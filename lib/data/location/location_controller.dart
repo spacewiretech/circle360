@@ -51,6 +51,19 @@ class LocationState {
       ? LatLng(status.latitude!, status.longitude!)
       : null;
 
+  /// Value equality, so a native push that changed nothing does not rebuild the screen.
+  /// Leans on [TrackingStatus]'s own `==`.
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is LocationState &&
+          other.status == status &&
+          other.busy == busy &&
+          other.error == error;
+
+  @override
+  int get hashCode => Object.hash(status, busy, error);
+
   LocationState copyWith({
     TrackingStatus? status,
     bool? busy,

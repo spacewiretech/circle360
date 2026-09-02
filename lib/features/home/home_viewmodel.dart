@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../data/dialer.dart';
 import '../../data/location/location_controller.dart';
 import '../../data/models/tracked_person.dart';
 import '../../data/providers.dart';
@@ -185,8 +186,19 @@ class HomeViewModel extends Notifier<HomeState> {
   }
 
   Future<void> runAction(PersonAction action, TrackedPerson person) async {
+    // Calling is done on the device, not through the backend, so it never reaches the
+    // repository's message-returning contract.
+    if (action == PersonAction.call) return callPerson(person);
+
     final message = await _family.triggerAction(action, person);
     state = state.copyWith(message: message);
+  }
+
+  /// Opens the dialer on this person's number. Silent on success — the dialer coming up is
+  /// the confirmation.
+  Future<void> callPerson(TrackedPerson person) async {
+    final error = await dialNumber(person.phone);
+    if (error != null) state = state.copyWith(message: error);
   }
 
   void consumeMessage() => state = state.copyWith(clearMessage: true);

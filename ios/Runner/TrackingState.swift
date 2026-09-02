@@ -18,6 +18,12 @@ enum TrackingState {
         static let accuracy = "loc360.lastAccuracy"
         static let fixAt = "loc360.lastFixAt"
         static let successAt = "loc360.lastSuccessAt"
+        // The last position the backend accepted, which is what the upload gate measures
+        // against. Deliberately separate from the last *fix* above, which is written on every
+        // delegate callback and so would always be zero metres away.
+        static let sentLat = "loc360.sentLat"
+        static let sentLng = "loc360.sentLng"
+        static let sentAt = "loc360.sentAt"
         static let successCount = "loc360.successCount"
         static let failureCount = "loc360.failureCount"
         static let lastError = "loc360.lastError"
@@ -47,6 +53,12 @@ enum TrackingState {
         defaults.removeObject(forKey: Key.endpoint)
         defaults.removeObject(forKey: Key.apiKey)
         defaults.removeObject(forKey: Key.token)
+        // Dropped with the credential: the next sign-in is a different session, and possibly a
+        // different person on a shared handset. Leaving it would let the gate suppress their
+        // first upload for a whole heartbeat.
+        defaults.removeObject(forKey: Key.sentLat)
+        defaults.removeObject(forKey: Key.sentLng)
+        defaults.removeObject(forKey: Key.sentAt)
     }
 
     /// Nil until Dart has signed in. Nil means "do not upload", never "upload anonymously".
@@ -80,6 +92,28 @@ enum TrackingState {
         defaults.set(location.coordinate.longitude, forKey: Key.lng)
         defaults.set(location.horizontalAccuracy, forKey: Key.accuracy)
         defaults.set(Date().timeIntervalSince1970 * 1000, forKey: Key.fixAt)
+    }
+
+    /// What the backend last accepted. Nil until the first successful upload.
+    static var lastSent: (location: CLLocation, at: Date)? {
+        guard defaults.object(forKey: Key.sentAt) != nil else { return nil }
+        return (
+            CLLocation(
+                latitude: defaults.double(forKey: Key.sentLat),
+                longitude: defaults.double(forKey: Key.sentLng)
+            ),
+            Date(timeIntervalSince1970: defaults.double(forKey: Key.sentAt))
+        )
+    }
+
+    /// Records a position the backend accepted.
+    ///
+    /// Called only on success, so a failed POST leaves the gate open and the next tick retries
+    /// rather than being suppressed until the heartbeat comes round.
+    static func recordSent(_ location: CLLocation) {
+        defaults.set(location.coordinate.latitude, forKey: Key.sentLat)
+        defaults.set(location.coordinate.longitude, forKey: Key.sentLng)
+        defaults.set(Date().timeIntervalSince1970, forKey: Key.sentAt)
     }
 
     static func recordUploadSuccess() {

@@ -29,7 +29,13 @@ enum ShareStatus {
 ///
 /// Measured against the server's `updated_at`, never the device's own timestamp — a wrong or
 /// tampered device clock must not be able to make a stale position look current.
-const _freshFor = Duration(minutes: 5);
+///
+/// Sized against the native uploader's heartbeat, not against the fix interval: a stationary
+/// device deliberately stops uploading and only reports every 15 minutes, so a 5-minute window
+/// would mark everyone sitting still as offline. Three constants have to agree, and they live
+/// in three languages — this one, `HEARTBEAT_MS` in `LocationTrackingService.kt`, and
+/// `heartbeat` in `LocationTracker.swift`. Keep this the largest of the three.
+const _freshFor = Duration(minutes: 20);
 
 @immutable
 class TrackedPerson {
@@ -136,6 +142,38 @@ class TrackedPerson {
     return DateTime.tryParse(raw)?.toLocal();
   }
 
+  /// Value equality, because the list is rebuilt from scratch on every 10-second poll.
+  ///
+  /// Without this, `select((s) => s.expanded)` compares by reference and reports a change on
+  /// every poll even when nothing moved — which is what used to re-open the Home sheet and
+  /// reset the map's zoom under the user twice a minute.
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is TrackedPerson &&
+          other.id == id &&
+          other.name == name &&
+          other.avatarAsset == avatarAsset &&
+          other.status == status &&
+          other.position == position &&
+          other.distanceKm == distanceKm &&
+          other.updatedAt == updatedAt &&
+          other.placeLabel == placeLabel &&
+          other.phone == phone;
+
+  @override
+  int get hashCode => Object.hash(
+        id,
+        name,
+        avatarAsset,
+        status,
+        position,
+        distanceKm,
+        updatedAt,
+        placeLabel,
+        phone,
+      );
+
   TrackedPerson copyWith({
     String? name,
     ShareStatus? status,
@@ -168,6 +206,19 @@ enum PersonAction {
   const PersonAction(this.label);
 
   final String label;
+
+  /// Whether the tile is offered on a card yet.
+  ///
+  /// Beep has to ring *the other person's* phone, which needs a push channel — there is no
+  /// FCM/APNs wiring in the app at all. Rather than show a confirmation for something that
+  /// never happened, the tile is hidden until that exists. Everything behind it — the icon,
+  /// the labels, the `triggerAction` branch — is deliberately left in place, so turning it
+  /// back on is this one line.
+  bool get isAvailable => this != PersonAction.beep;
+
+  /// The actions a card actually renders. Use this rather than [values] in the UI.
+  static List<PersonAction> get available =>
+      values.where((action) => action.isAvailable).toList(growable: false);
 
   /// The label is split across two lines in the design.
   (String, String) get labelLines => switch (this) {

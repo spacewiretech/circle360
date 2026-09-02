@@ -160,11 +160,20 @@ void main() {
       await viewModel.addPerson(name: 'Mom', phone: '+91 8764597659');
       final person = container.read(homeViewModelProvider).people.single;
 
-      await viewModel.runAction(PersonAction.call, person);
+      // Not `call`: that one opens the dialer on the device and deliberately says nothing on
+      // success, so it never reaches the repository's message-returning path.
+      await viewModel.runAction(PersonAction.shareCurrent, person);
       expect(container.read(homeViewModelProvider).message, contains(person.name));
 
       viewModel.consumeMessage();
       expect(container.read(homeViewModelProvider).message, isNull);
+    });
+
+    test('beep is withheld from the card until there is a push channel', () {
+      expect(PersonAction.available, isNot(contains(PersonAction.beep)));
+      expect(PersonAction.available, contains(PersonAction.call));
+      // The enum case itself has to survive, so the feature can be finished later.
+      expect(PersonAction.values, contains(PersonAction.beep));
     });
   });
 

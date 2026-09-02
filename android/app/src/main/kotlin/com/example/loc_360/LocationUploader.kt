@@ -66,6 +66,8 @@ object LocationUploader {
                 when (val code = connection.responseCode) {
                     in 200..299 -> {
                         TrackingState.recordUploadSuccess(appContext)
+                        // Only now does this position become the one the gate measures from.
+                        TrackingState.recordSent(appContext, location)
                         Log.d(TAG, "POST $code ok")
                     }
 
