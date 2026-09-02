@@ -7,11 +7,20 @@ class PolicyDoc {
     required this.title,
     required this.intro,
     required this.sections,
+    this.shortTitle,
   });
 
   /// Path segment, without the leading slash. Matches `SiteRoutes`.
   final String slug;
+
+  /// The heading on the page itself.
   final String title;
+
+  /// Set only where the page heading is too long to sit in a footer column.
+  final String? shortTitle;
+
+  /// How the page is named in the footer and in cross-links.
+  String get navLabel => shortTitle ?? title;
 
   /// Standfirst under the title.
   final String intro;
@@ -165,7 +174,7 @@ abstract final class PolicyDocs {
               'The app keeps working; it simply has nothing to share.',
           'Remove someone. Take a person out of your circle and the sharing ends both ways.',
           'Get a copy of your data, or correct it. Write to $_email.',
-          'Delete everything. Use the in-app option or the account deletion page.',
+          'Delete everything. See the account deletion page.',
         ],
       ),
       PolicySection(
@@ -317,12 +326,13 @@ abstract final class PolicyDocs {
               'notifies you before each debit, as UPI Autopay requires.',
         ],
       ),
+      // TODO(circle360): nothing in the app calls the `subscription-cancel` Edge Function
+      // yet, so an in-app cancel button does not exist. Add it to this list once it ships.
       PolicySection(
         heading: 'How to cancel',
         bullets: [
-          'In the app: open Settings and cancel your subscription.',
           'In your UPI app: find the Circle360 mandate under AutoPay or Mandates and cancel '
-              'or pause it.',
+              'or pause it. This stops the debit at source and takes effect immediately.',
           'By email: write to $_email from the number registered on your account and we will '
               'cancel it for you.',
         ],
@@ -420,24 +430,22 @@ abstract final class PolicyDocs {
   static const deleteAccount = PolicyDoc(
     slug: 'delete-account',
     title: 'Delete your account',
+    shortTitle: 'Delete Account',
     intro:
         'You can delete your Circle360 account and everything in it at any time. Here is how, '
         'and exactly what goes.',
     sections: [
+      // TODO(circle360): the app has no in-app deletion yet — Settings only offers Sign out,
+      // and there is no delete-account Edge Function. Google Play requires an in-app route
+      // as well as this page. When that ships, add the in-app steps here as the first
+      // section; until then this page must not promise it.
       PolicySection(
-        heading: 'From inside the app',
+        heading: 'How to ask',
         paragraphs: [
-          'Open Circle360, go to Settings, and choose to delete your account. You will be '
-              'asked to confirm. This is the fastest route and needs nothing from us.',
-        ],
-      ),
-      PolicySection(
-        heading: 'By email',
-        paragraphs: [
-          'If you no longer have the app installed, write to $_email from the phone number '
-              'registered on the account, with the subject "Delete my account". We may ask '
-              'you to confirm the number by OTP so that nobody else can delete your account. '
-              'We act on verified requests within 7 working days.',
+          'Write to $_email from the phone number registered on the account, with the '
+              'subject "Delete my account". We may ask you to confirm the number by OTP, so '
+              'that nobody else can delete your account by naming your number.',
+          'We act on verified requests within 7 working days and email you when it is done.',
         ],
       ),
       PolicySection(

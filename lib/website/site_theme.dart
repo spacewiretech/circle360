@@ -49,6 +49,9 @@ abstract final class SiteColors {
 
   /// Footer body copy on [ink].
   static const onInkMuted = Color(0xFFA9B4D0);
+
+  /// The brand blue lifted enough to read on [ink]. `AppColors.brand` is tuned for white.
+  static const brandOnInk = Color(0xFF4D9BFF);
 }
 
 /// Web-scale type. The app's [AppText] tops out at 24px for a phone sheet; a landing page

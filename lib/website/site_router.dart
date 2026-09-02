@@ -26,8 +26,12 @@ abstract final class SiteRoutes {
 
 /// Separate from `appRouter` in `lib/app/router.dart` on purpose: the site shares the brand
 /// but none of the app's state, gates or redirects.
-final siteRouter = GoRouter(
-  initialLocation: SiteRoutes.home,
+final siteRouter = buildSiteRouter();
+
+/// A fresh router. The app uses the single [siteRouter]; tests build their own so that
+/// navigating in one case cannot leak into the next.
+GoRouter buildSiteRouter({String initialLocation = SiteRoutes.home}) => GoRouter(
+  initialLocation: initialLocation,
   routes: [
     GoRoute(
       path: SiteRoutes.home,

@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
   <!--
     If you are serving your web app in a path other than the root, change the
@@ -18,21 +18,125 @@
 
   <meta charset="UTF-8">
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
-  <meta name="description" content="A new Flutter project.">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="description" content="Circle360 keeps your family's live location, emergency contacts and instant invites in one simple app. Built for Indian families.">
+  <meta name="theme-color" content="#026BFE">
+
+  <!-- The site renders to canvas, so these tags are almost all a crawler or a link preview
+       ever sees. Keep them in step with SiteCopy. -->
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Circle360">
+  <meta property="og:title" content="Circle360 — Family location sharing, made simple">
+  <meta property="og:description" content="Know they're safe. Always. Live family location, emergency contacts and instant invites in one simple app.">
+  <meta property="og:image" content="icons/Icon-512.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Circle360 — Family location sharing, made simple">
+  <meta name="twitter:description" content="Know they're safe. Always. Live family location, emergency contacts and instant invites in one simple app.">
 
   <!-- iOS meta tags & icons -->
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black">
-  <meta name="apple-mobile-web-app-title" content="loc_360">
+  <meta name="apple-mobile-web-app-title" content="Circle360">
   <link rel="apple-touch-icon" href="icons/Icon-192.png">
 
   <!-- Favicon -->
   <link rel="icon" type="image/png" href="favicon.png"/>
 
-  <title>loc_360</title>
+  <!-- google_fonts pulls Poppins and Inter over the network at runtime; warming the
+       connections here shortens the swap from the fallback face. -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+
+  <title>Circle360 — Family location sharing, made simple</title>
   <link rel="manifest" href="manifest.json">
+
+  <style>
+    html, body { margin: 0; padding: 0; height: 100%; background: #FBF8F5; }
+
+    /* Shown until Flutter paints its first frame, so the page is never a blank white box. */
+    #site-loader {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 22px;
+      background: #FBF8F5;
+      z-index: 10;
+      transition: opacity 260ms ease;
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    }
+    #site-loader.hidden { opacity: 0; pointer-events: none; }
+    #site-loader img { width: 54px; height: auto; }
+    #site-loader .bar {
+      width: 132px;
+      height: 3px;
+      border-radius: 999px;
+      background: #E0ECFE;
+      overflow: hidden;
+    }
+    #site-loader .bar span {
+      display: block;
+      width: 40%;
+      height: 100%;
+      border-radius: 999px;
+      background: #026BFE;
+      animation: slide 1.15s ease-in-out infinite;
+    }
+    @keyframes slide {
+      0%   { transform: translateX(-100%); }
+      100% { transform: translateX(330%); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      #site-loader .bar span { animation: none; width: 100%; }
+    }
+
+    /* Only ever seen with JavaScript disabled — and by crawlers, which is the point. */
+    .noscript-wrap {
+      max-width: 680px;
+      margin: 0 auto;
+      padding: 48px 24px;
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      color: #0A1544;
+      line-height: 1.7;
+    }
+    .noscript-wrap a { color: #026BFE; }
+  </style>
 </head>
 <body>
+  <div id="site-loader">
+    <img src="icons/Icon-192.png" alt="Circle360">
+    <div class="bar"><span></span></div>
+  </div>
+
+  <noscript>
+    <div class="noscript-wrap">
+      <h1>Circle360 — Family location sharing, made simple</h1>
+      <p>
+        Know they're safe. Always. Circle360 keeps your family's live location, emergency
+        contacts and instant invites in one simple app. Built for Indian families.
+      </p>
+      <ul>
+        <li><strong>Live family map</strong> — everyone you've added on one map, updating as they move.</li>
+        <li><strong>Distance at a glance</strong> — how far away each person is, and when their location last came through.</li>
+        <li><strong>Invite in seconds</strong> — send a link over SMS; they connect automatically on install.</li>
+        <li><strong>Emergency contacts</strong> — the people who matter, one tap from a call.</li>
+      </ul>
+      <p>₹3 for 2 days, then ₹499/month by UPI Autopay. Cancel any time.</p>
+      <h2>Policies</h2>
+      <ul>
+        <li><a href="/privacy">Privacy Policy</a></li>
+        <li><a href="/terms">Terms &amp; Conditions</a></li>
+        <li><a href="/refund">Cancellation &amp; Refund</a></li>
+        <li><a href="/shipping">Shipping &amp; Delivery</a></li>
+        <li><a href="/delete-account">Delete Account</a></li>
+        <li><a href="/contact">Contact Us</a></li>
+      </ul>
+      <p>This site needs JavaScript enabled to display its full content.</p>
+    </div>
+  </noscript>
+
   <!--
     You can customize the "flutter_bootstrap.js" script.
     This is useful to provide a custom configuration to the Flutter loader
@@ -42,5 +146,13 @@
     * https://docs.flutter.dev/platform-integration/web/initialization
   -->
   <script src="flutter_bootstrap.js" async></script>
+  <script>
+    window.addEventListener('flutter-first-frame', function () {
+      var loader = document.getElementById('site-loader');
+      if (!loader) return;
+      loader.classList.add('hidden');
+      setTimeout(function () { loader.remove(); }, 300);
+    });
+  </script>
 </body>
 </html>

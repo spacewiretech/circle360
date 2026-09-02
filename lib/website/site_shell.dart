@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:google_fonts/google_fonts.dart';
 
 import '../app/assets.dart';
 import '../app/theme/app_colors.dart';
+import 'policy_docs.dart';
 import 'site_copy.dart';
 import 'site_router.dart';
 import 'site_theme.dart';
@@ -274,14 +276,6 @@ class _NavDrawer extends StatelessWidget {
 class SiteFooter extends StatelessWidget {
   const SiteFooter({super.key});
 
-  static const _policies = <({String label, String route})>[
-    (label: 'Privacy Policy', route: SiteRoutes.privacy),
-    (label: 'Terms & Conditions', route: SiteRoutes.terms),
-    (label: 'Cancellation & Refund', route: SiteRoutes.refund),
-    (label: 'Shipping & Delivery', route: SiteRoutes.shipping),
-    (label: 'Delete Account', route: SiteRoutes.deleteAccount),
-  ];
-
   @override
   Widget build(BuildContext context) {
     final mobile = isMobile(context);
@@ -293,15 +287,7 @@ class SiteFooter extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
           children: [
-            Image.asset(
-              Img.logoWordmark,
-              height: 26,
-              fit: BoxFit.contain,
-              // The wordmark is dark navy artwork; on the ink band it has to be lifted to
-              // white rather than sat on a light chip.
-              color: Colors.white,
-              colorBlendMode: BlendMode.srcIn,
-            ),
+            const _FooterWordmark(),
             const SizedBox(height: 16),
             Text(
               SiteCopy.tagline,
@@ -319,9 +305,11 @@ class SiteFooter extends StatelessWidget {
       ),
       _FooterColumn(
         heading: 'Policies',
+        // Driven off PolicyDocs so a new legal page appears here by existing, and the label
+        // can never drift from the page it opens.
         links: [
-          for (final policy in _policies)
-            (label: policy.label, onTap: () => context.go(policy.route)),
+          for (final doc in PolicyDocs.all)
+            (label: doc.navLabel, onTap: () => context.go('/${doc.slug}')),
         ],
       ),
       _FooterColumn(
@@ -359,6 +347,34 @@ class SiteFooter extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// The wordmark set as text rather than the PNG.
+///
+/// `logo_wordmark.png` is navy-and-blue artwork made for a white ground; tinting it white for
+/// the ink band collapses the "360" into a solid block, so the footer draws the mark instead.
+class _FooterWordmark extends StatelessWidget {
+  const _FooterWordmark();
+
+  @override
+  Widget build(BuildContext context) {
+    final base = GoogleFonts.poppins(
+      fontSize: 26,
+      fontWeight: FontWeight.w700,
+      letterSpacing: -0.6,
+      height: 1.1,
+    );
+
+    return Text.rich(
+      TextSpan(
+        children: [
+          TextSpan(text: 'Circle', style: base.copyWith(color: Colors.white)),
+          TextSpan(text: '360', style: base.copyWith(color: SiteColors.brandOnInk)),
+        ],
+      ),
+      semanticsLabel: SiteCopy.appName,
     );
   }
 }

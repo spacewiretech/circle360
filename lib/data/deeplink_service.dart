@@ -37,6 +37,10 @@ class DeeplinkService {
 /// - `loc360://invite?code=ABC123&from=Mom`
 /// - `https://loc360.app/invite/ABC123?from=Mom`
 ///
+/// The https form is also what the marketing site serves to someone who does not have the
+/// app — `SiteRoutes.invite` in `lib/website/site_router.dart` matches the same shape, so a
+/// change to the link format has to be made in both places.
+///
 /// Kept a free function so it can be tested without the platform channel.
 InviteLink? parseInvite(Uri uri) {
   final segments = uri.pathSegments.where((s) => s.isNotEmpty).toList();

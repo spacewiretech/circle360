@@ -46,20 +46,22 @@ abstract final class SiteCopy {
   static const maxPeople = 3;
 
   static const features = <FeatureCopy>[
+    // Four visually distinct marks — pin, crosshair, plus, handset. `actionShareLive` is
+    // almost the same drawing as `placePin`, so it is deliberately not used here.
     FeatureCopy(
-      icon: Svg.iconFamily,
+      icon: Svg.placePin,
       title: 'Live family map',
       body: 'Everyone you’ve added on one map, updating as they move. No refreshing, '
           'no asking "where are you?"',
     ),
     FeatureCopy(
-      icon: Svg.placePin,
+      icon: Svg.actionShareCurrent,
       title: 'Distance at a glance',
       body: 'Each person shows how far away they are and when their location last came '
           'through, so you know the map is current.',
     ),
     FeatureCopy(
-      icon: Svg.actionShareLive,
+      icon: Svg.addPlus,
       title: 'Invite in seconds',
       body: 'Send a link over your own SMS app. They install Circle360, sign in with that '
           'number, and you’re connected automatically.',
@@ -120,9 +122,9 @@ abstract final class SiteCopy {
     FaqCopy(
       question: 'How do I cancel?',
       answer:
-          'Open Settings in the app and cancel your subscription, or cancel the mandate '
-          'directly in your UPI app. Access continues until the end of the period you have '
-          'already paid for.',
+          'Cancel the mandate in your own UPI app — look under AutoPay or Mandates — or '
+          'write to ${SitePlaceholders.supportEmail} and we will cancel it for you. Access '
+          'continues until the end of the period you have already paid for.',
     ),
     FaqCopy(
       question: 'How do I delete my account?',
