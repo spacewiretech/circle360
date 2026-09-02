@@ -128,11 +128,35 @@ void main() {
   });
 
   group('placeholders', () {
-    test('are still obviously unfilled, so nobody ships them by accident', () {
-      // Flip these expectations when the real details go in — the failure is the reminder.
-      expect(SitePlaceholders.legalEntity, startsWith('['));
-      expect(SitePlaceholders.supportEmail, startsWith('['));
+    // Rewritten now the real details are in. Rather than pinning each value — which just moves
+    // the maintenance burden — this asserts the *shape* of an unfilled placeholder, so a new
+    // one added later is caught without anyone remembering to add a case for it.
+    test('nothing obviously unfilled can ship', () {
+      const filled = <String, String>{
+        'legalEntity': SitePlaceholders.legalEntity,
+        'address': SitePlaceholders.address,
+        'supportEmail': SitePlaceholders.supportEmail,
+        'siteDomain': SitePlaceholders.siteDomain,
+        'supportPhone': SitePlaceholders.supportPhone,
+      };
+
+      filled.forEach((name, value) {
+        expect(value, isNotEmpty, reason: '$name is blank');
+        expect(value, isNot(startsWith('[')), reason: '$name is still bracketed');
+        expect(
+          value.toUpperCase(),
+          isNot(contains('XXX')),
+          reason: '$name still has an XXXXX placeholder in it',
+        );
+        expect(value.toUpperCase(), isNot(contains('TODO')), reason: '$name is a TODO');
+      });
+    });
+
+    test('store links stay null until the listings are real', () {
+      // Null is the deliberate "coming soon" state, not an oversight — the download buttons
+      // read it directly. Flip these when the listings go live.
       expect(SitePlaceholders.playStoreUrl, isNull);
+      expect(SitePlaceholders.appStoreUrl, isNull);
     });
   });
 }

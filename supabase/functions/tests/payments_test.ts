@@ -26,7 +26,7 @@ import {
   webhookSignature,
 } from "../_shared/cashfree.ts";
 import { isEntitled, isInTrial, UserRow } from "../_shared/entitlement.ts";
-import { paymentKind } from "../_shared/subscription_sync.ts";
+import { isFailedCharge, paymentKind } from "../_shared/subscription_sync.ts";
 
 const NOW = new Date("2026-09-01T12:00:00Z");
 
@@ -391,4 +391,19 @@ Deno.test("an unreadable refund payload yields null rather than throwing", () =>
   assertEquals(disputeFrom({}), null);
   assertEquals(refundFrom({ data: null }), null);
   assertEquals(disputeFrom({ data: "nonsense" }), null);
+});
+
+Deno.test("a scheduled charge is not a failed one", () => {
+  // Cashfree reports INITIALIZED for a debit it has only scheduled. Counting that as a failure
+  // told a user their payment had been declined before it was even attempted.
+  assertFalse(isFailedCharge("INITIALIZED"));
+  assertFalse(isFailedCharge("PENDING"));
+  assertFalse(isFailedCharge("BANK_APPROVAL_PENDING"));
+  assertFalse(isFailedCharge("SUCCESS"));
+  // Nor is a status we do not recognise: alarming someone over nothing is the worse error.
+  assertFalse(isFailedCharge("SOME_NEW_CASHFREE_STATE"));
+
+  assert(isFailedCharge("FAILED"));
+  assert(isFailedCharge("USER_DROPPED"));
+  assert(isFailedCharge("cancelled"), "case-insensitive");
 });

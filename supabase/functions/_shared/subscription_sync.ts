@@ -272,6 +272,20 @@ export async function recordPayment(
  * Best-effort: these columns are reporting, not entitlement. A failure here must never abort
  * the charge handling it hangs off.
  */
+/**
+ * Whether a charge actually failed, as opposed to not having happened yet.
+ *
+ * An allowlist, not "anything that is not SUCCESS". Cashfree reports several non-terminal
+ * states — INITIALIZED for a debit it has merely scheduled, PENDING and BANK_APPROVAL_PENDING
+ * while one settles — and counting those as failures told a user their payment had been
+ * declined when it had not yet been attempted. An unrecognised status is likewise not called a
+ * failure: being wrong in that direction is the one that alarms people over nothing.
+ */
+export function isFailedCharge(status: string): boolean {
+  return ["FAILED", "CANCELLED", "DROPPED", "USER_DROPPED", "VOID", "EXPIRED"]
+    .includes((status ?? "").toUpperCase());
+}
+
 export async function refreshPaymentTotals(
   db: SupabaseClient,
   userId: string,
@@ -313,8 +327,7 @@ export async function refreshPaymentTotals(
 
     await db.from("users").update({
       successful_charge_count: recurring.length,
-      failed_charge_count:
-        rows.filter((r) => r.status !== "SUCCESS" && r.status !== "PENDING").length,
+      failed_charge_count: rows.filter((r) => isFailedCharge(r.status as string)).length,
       total_paid_amount: Math.max(0, paid - refunded),
       first_paid_at: times[0] ?? null,
       last_payment_at: latest ? (latest.payment_time ?? latest.created_at) : null,
