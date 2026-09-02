@@ -38,10 +38,13 @@ Deno.serve(async (req) => {
   const subscription = await latestSubscription(db, userId);
 
   if (subscription && !TERMINAL.includes(subscription.status)) {
-    // Pull the payments list only when the stored state says this user is about to be turned
-    // away. That is exactly the case a missed webhook produces — debited by Cashfree, still
-    // `trial` here — and it keeps the extra call off the ordinary foreground poll, which runs
-    // on every app resume.
+    // Pull the payments list only when a debit could be unaccounted for, so the extra Cashfree
+    // call stays off the ordinary foreground poll that runs on every app resume.
+    //
+    // Two triggers. `blocked` is the user already being turned away — the end state a missed
+    // webhook produces. `chargeDue` catches it earlier: Cashfree's schedule has passed, so a
+    // debit has probably happened, and waiting for the user to be locked out first would mean
+    // recovering their access only after they had already been shown the paywall.
     const { data: stored } = await db
       .from("users")
       .select(USER_COLUMNS)
@@ -49,10 +52,18 @@ Deno.serve(async (req) => {
       .maybeSingle();
 
     const blocked = !stored || !isEntitled(asUserRow(stored), graceHours);
+    const chargeDue = subscription.next_schedule_date !== null &&
+      new Date(subscription.next_schedule_date).getTime() <= Date.now();
 
     try {
       const settings = cashfreeSettings(config);
-      await syncSubscription(db, settings, subscription.subscription_id, 0, blocked);
+      await syncSubscription(
+        db,
+        settings,
+        subscription.subscription_id,
+        0,
+        blocked || chargeDue,
+      );
     } catch (error) {
       // Logged, not surfaced. The stored state below is still a correct answer, just possibly
       // a few minutes stale, and the webhook or the nightly sweep will catch up.
