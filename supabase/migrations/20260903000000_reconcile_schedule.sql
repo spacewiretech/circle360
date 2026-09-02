@@ -14,8 +14,10 @@ create extension if not exists pg_net;
 -- Generated in the database so the value never passes through a migration file, a shell history
 -- or a code review. Only filled when still empty, so re-running this cannot rotate a secret out
 -- from under a scheduled job that is already using it.
+-- Schema-qualified: pgcrypto lives in `extensions` on Supabase and is not on the search_path
+-- a migration runs with, so the bare name resolves to nothing.
 update public.app_config
-   set value = encode(gen_random_bytes(32), 'hex')
+   set value = encode(extensions.gen_random_bytes(32), 'hex')
  where key = 'reconcile_secret'
    and (value is null or value = '');
 
