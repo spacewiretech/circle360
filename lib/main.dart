@@ -1,32 +1,21 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 
-import 'app/app.dart';
-import 'app/env.dart';
-
-export 'app/app.dart' show Loc360App;
+import 'boot/mobile_boot.dart';
+import 'website/site_app.dart';
+import 'website/url_strategy.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await Env.load();
 
-  if (Env.hasSupabase) {
-    try {
-      await Supabase.initialize(
-        url: Env.supabaseUrl,
-        // Same value as the legacy `anonKey`; that parameter is deprecated.
-        publishableKey: Env.supabaseAnonKey,
-        // Supabase Auth is unused — phone verification runs through Fast2SMS and the Edge
-        // Functions issue their own session tokens.
-        authOptions: const FlutterAuthClientOptions(autoRefreshToken: false),
-      );
-    } catch (error) {
-      // A bad URL or an unreachable project must not stop the app from starting; the
-      // repositories fall back on their own.
-      debugPrint('Supabase init failed, continuing without it: $error');
-    }
+  // The marketing site is the whole of the web build. The app itself is phone-only — a native
+  // background location service and a UPI checkout that only exists inside the Cashfree app —
+  // so there is nothing on web for it to fall through to.
+  if (kIsWeb) {
+    configureUrlStrategy();
+    runApp(const Circle360SiteApp());
+    return;
   }
 
-  runApp(const ProviderScope(child: Loc360App()));
+  await bootMobileApp();
 }

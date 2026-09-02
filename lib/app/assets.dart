@@ -14,6 +14,10 @@ abstract final class Img {
   /// Device mockup shown above the sheet on the invite screen.
   static const inviteHero = 'assets/images/invite_hero.png';
 
+  /// Hero mockup for the marketing site. The same frame as [inviteHero] but carrying the
+  /// current wordmark — the in-app one still shows the pre-rebrand "Loc360".
+  static const inviteHeroWeb = 'assets/images/invite_hero_web.png';
+
   /// The faces a tracked person can be given.
   ///
   /// There is no avatar upload backend, so a person's face is picked deterministically from

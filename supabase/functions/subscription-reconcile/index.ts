@@ -3,7 +3,7 @@ import { configSetting, loadConfig } from "../_shared/config.ts";
 import { corsHeaders, json } from "../_shared/cors.ts";
 import { serviceClient } from "../_shared/db.ts";
 import { constantTimeEquals } from "../_shared/cashfree.ts";
-import { syncSubscription } from "../_shared/subscription_sync.ts";
+import { refreshPaymentTotals, syncSubscription } from "../_shared/subscription_sync.ts";
 
 /**
  * The safety net under the webhook. Run it on a schedule:
@@ -104,7 +104,11 @@ Deno.serve(async (req) => {
       // withPayments: this sweep exists for the case where a webhook never arrived, and the
       // subscription snapshot alone cannot tell us a ₹499 was taken. Only the payments list
       // can, and without it a debited user still lapses.
-      await syncSubscription(db, settings, id, 0, true);
+      const result = await syncSubscription(db, settings, id, 0, true);
+      // Denormalised counters are recomputed from the ledger, so anything that drifted — a
+      // partial write, a charge recorded before these columns existed — is repaired here
+      // rather than staying wrong forever.
+      await refreshPaymentTotals(db, result.subscription.user_id);
       synced++;
     } catch (err) {
       // One bad subscription must not abort the batch — the rest still need reconciling.

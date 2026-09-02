@@ -110,10 +110,30 @@ function userUpdatesFor(
       break;
 
     // ON_HOLD, PAUSED, INITIALIZED, PENDING_AUTHORIZATION and anything Cashfree adds later
-    // need no user-level write. The dates simply stop advancing and entitlement lapses on its
+    // need no *entitlement* write. The dates simply stop advancing and access lapses on its
     // own, which is the correct behaviour for every one of them.
     default:
       break;
+  }
+
+  // Mandate health, recorded separately from entitlement so it can be acted on before the
+  // clock runs out. Previously ON_HOLD and PAUSED left no trace at all: a user whose UPI
+  // mandate had stalled looked completely healthy right up to the moment they were locked out,
+  // with nothing anywhere to prompt them to fix it.
+  updates.billing_state = snapshot.status === "ON_HOLD"
+    ? "on_hold"
+    : snapshot.status === "PAUSED"
+    ? "paused"
+    : null;
+
+  // Dates worth having on the row rather than behind a join.
+  if (snapshot.authorizedAt) {
+    updates.trial_started_at = user.trial_started_at ?? snapshot.authorizedAt;
+    updates.subscription_started_at = user.subscription_started_at ?? snapshot.authorizedAt;
+  }
+  updates.next_billing_at = snapshot.nextScheduleDate;
+  if (snapshot.status === "CANCELLED" && !user.cancelled_at) {
+    updates.cancelled_at = new Date().toISOString();
   }
 
   return updates;
@@ -204,6 +224,10 @@ export async function recordPayment(
     failure_reason: payment.failureReason,
   }).eq("id", subscription.id);
 
+  // Reporting columns follow every attempt, including the failures — a declined renewal is
+  // exactly what someone looking at this row needs to see.
+  await refreshPaymentTotals(db, subscription.user_id);
+
   // UNKNOWN never credits: it means we could not tell an authorisation from a renewal, and
   // guessing in the user's favour is how an unreadable payload becomes a free month.
   if (kind !== "RECURRING" || payment.status !== "SUCCESS") return;
@@ -231,6 +255,72 @@ export async function recordPayment(
     .from("users")
     .update(updatesForRecurringSuccess(asUserRow(user), paidAt))
     .eq("user_id", subscription.user_id);
+}
+
+/**
+ * Recomputes the denormalised payment columns on `users` from the ledger.
+ *
+ * Recompute rather than increment. An increment has to be applied exactly once, which means
+ * every caller has to know whether it is replaying history or seeing something new — and the
+ * reconcile sweep, whose whole job is replaying history, would inflate the totals every hour.
+ * Recomputing is idempotent by construction, so it is safe from anywhere and repairs drift
+ * rather than adding to it.
+ *
+ * Best-effort: these columns are reporting, not entitlement. A failure here must never abort
+ * the charge handling it hangs off.
+ */
+export async function refreshPaymentTotals(
+  db: SupabaseClient,
+  userId: string,
+): Promise<void> {
+  try {
+    const { data: rows } = await db
+      .from("subscription_payments")
+      .select("kind, amount, status, payment_time, created_at")
+      .eq("user_id", userId);
+
+    if (!rows) return;
+
+    // Refunded money is not money the user paid, so it comes back off the total.
+    const { data: refunds } = await db
+      .from("subscription_refunds")
+      .select("amount, status")
+      .eq("user_id", userId);
+
+    const succeeded = rows.filter((r) => r.status === "SUCCESS");
+    const recurring = succeeded.filter((r) => r.kind === "RECURRING");
+    const times = recurring
+      .map((r) => (r.payment_time ?? r.created_at) as string | null)
+      .filter((t): t is string => t !== null)
+      .sort();
+
+    const paid = succeeded.reduce((sum, r) => sum + Number(r.amount ?? 0), 0);
+    const refunded = (refunds ?? [])
+      .filter((r) => r.status === "SUCCESS")
+      .reduce((sum, r) => sum + Number(r.amount ?? 0), 0);
+
+    // The most recent attempt of any kind, successful or not — "did my payment go through"
+    // is a question about the last thing that happened, not the last thing that worked.
+    const latest = rows
+      .slice()
+      .sort((a, b) =>
+        new Date((b.payment_time ?? b.created_at) as string).getTime() -
+        new Date((a.payment_time ?? a.created_at) as string).getTime()
+      )[0];
+
+    await db.from("users").update({
+      successful_charge_count: recurring.length,
+      failed_charge_count:
+        rows.filter((r) => r.status !== "SUCCESS" && r.status !== "PENDING").length,
+      total_paid_amount: Math.max(0, paid - refunded),
+      first_paid_at: times[0] ?? null,
+      last_payment_at: latest ? (latest.payment_time ?? latest.created_at) : null,
+      last_payment_amount: latest?.amount ?? null,
+      last_payment_status: latest?.status ?? null,
+    }).eq("user_id", userId);
+  } catch (error) {
+    console.error(`could not refresh payment totals for ${userId}: ${error}`);
+  }
 }
 
 /**

@@ -35,6 +35,13 @@ export interface UserRow {
   trial_ends_at: string | null;
   current_period_end: string | null;
   active_subscription_id: string | null;
+
+  /// Reporting only — never consulted by [isEntitled]. Present here so the sync can avoid
+  /// overwriting a date it already set.
+  trial_started_at?: string | null;
+  subscription_started_at?: string | null;
+  cancelled_at?: string | null;
+  billing_state?: string | null;
 }
 
 /**
@@ -46,7 +53,8 @@ export interface UserRow {
  */
 export const USER_COLUMNS =
   "user_id, mobile_no, name, creation_time, payment_type, trial_ends_at, " +
-  "current_period_end, active_subscription_id";
+  "current_period_end, active_subscription_id, trial_started_at, " +
+  "subscription_started_at, cancelled_at, billing_state";
 
 /**
  * supabase-js derives a row type by parsing the *literal* select string, so passing the

@@ -30,6 +30,13 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  # Path-based URLs for the marketing site (lib/website), so `/privacy` and `/invite/CODE`
+  # work without a `#`. Web-only, reached through a conditional import.
+  flutter_web_plugins:
+    sdk: flutter
+  # Already resolved transitively; promoted to a direct dependency for the site's mailto:,
+  # store and `loc360://` links.
+  url_launcher: ^6.3.2
 
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.
