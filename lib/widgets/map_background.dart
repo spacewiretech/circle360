@@ -161,7 +161,14 @@ class PlaceChip extends StatelessWidget {
         children: [
           const AppIcon(Svg.placePin, size: 20),
           const SizedBox(width: 4),
-          Text(label, style: AppText.chip),
+          Flexible(
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: AppText.chip,
+            ),
+          ),
         ],
       ),
     );
