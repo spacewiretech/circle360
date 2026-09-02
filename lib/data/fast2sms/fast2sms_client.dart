@@ -51,7 +51,6 @@ class Fast2SmsClient {
   Future<void> resendOtp(String mobile) => _post('/dev/otp/resend', {'mobile': mobile});
 
   Future<VerifyResult> verifyOtp({required String mobile, required String otp}) async {
-    print("innnnn");
     try {
       await _post('/dev/otp/verify', {'mobile': mobile, 'otp': otp});
       return VerifyResult.verified;

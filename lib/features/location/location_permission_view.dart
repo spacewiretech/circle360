@@ -21,19 +21,57 @@ import '../onboarding/widgets/onboarding_scaffold.dart';
 ///
 /// It reuses [OnboardingScaffold] so it reads as the last step of onboarding rather than an
 /// interruption after payment.
-class LocationPermissionView extends ConsumerWidget {
+class LocationPermissionView extends ConsumerStatefulWidget {
   const LocationPermissionView({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<LocationPermissionView> createState() => _LocationPermissionViewState();
+}
+
+class _LocationPermissionViewState extends ConsumerState<LocationPermissionView>
+    with WidgetsBindingObserver {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // The reason this screen appeared stuck. On Android 11+ "Allow all the time" can only be
+    // granted in system Settings, and the native call resolves with the *pre-change* status
+    // the moment Settings opens. The status stream is fed by the tracking service, not by
+    // permission changes, so nothing else here ever learns the answer — the screen sat on
+    // stale state until the user tapped again. Re-ask the OS on the way back in.
+    if (state == AppLifecycleState.resumed) {
+      ref.read(locationControllerProvider.notifier).refresh();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final state = ref.watch(locationControllerProvider);
     final controller = ref.read(locationControllerProvider.notifier);
     final permission = state.permission;
 
-    final (String label, VoidCallback action, String? hint) = switch (permission) {
+    void toHome() => context.go(Routes.home);
+
+    // The primary button is the way forward the moment tracking is possible. It used to become
+    // a *second* ask once foreground permission landed — "Allow all the time" — which left the
+    // only route onward as a small text link most people never found. The background upgrade is
+    // still offered, but as the secondary action it always was in importance.
+    final (String label, VoidCallback action, String? hint, _Upgrade? upgrade) =
+        switch (permission) {
       LocationPermission.notRequested || LocationPermission.denied => (
           'Turn on location',
           controller.requestPermission,
+          null,
           null,
         ),
       // The OS stops showing the prompt after a hard denial, so Settings is the only route
@@ -42,21 +80,26 @@ class LocationPermissionView extends ConsumerWidget {
           'Open Settings',
           controller.openAppSettings,
           'Permission was permanently denied — it can only be re-enabled in Settings.',
+          null,
         ),
       LocationPermission.whileInUse => (
-          Platform.isIOS ? 'Allow "Always"' : 'Allow all the time',
-          controller.requestBackgroundPermission,
+          'Continue',
+          toHome,
           Platform.isIOS
               ? 'Without "Always", sharing stops when the app is force-quit and cannot restart.'
               : 'Without background access, sharing will not resume after a reboot.',
+          _Upgrade(
+            label: Platform.isIOS ? 'Allow "Always"' : 'Allow all the time',
+            onTap: controller.requestBackgroundPermission,
+          ),
         ),
-      LocationPermission.always => ('Continue', () => context.go(Routes.home), null),
+      LocationPermission.always => ('Continue', toHome, null, null),
     };
 
     return OnboardingScaffold(
-      prompt: 'Loc360 shares your location with the people you add, so they can find you '
+      prompt: 'Circle360 shares your location with the people you add, so they can find you '
           'when it matters.',
-      field: _Rationale(hint: hint, permission: permission),
+      field: _Rationale(hint: hint, permission: permission, upgrade: upgrade),
       buttonLabel: label,
       busy: state.busy,
       error: state.error,
@@ -66,12 +109,21 @@ class LocationPermissionView extends ConsumerWidget {
   }
 }
 
+/// The optional second ask, offered alongside the forward action rather than instead of it.
+class _Upgrade {
+  const _Upgrade({required this.label, required this.onTap});
+
+  final String label;
+  final VoidCallback onTap;
+}
+
 /// What the permission buys, and what the current answer costs.
 class _Rationale extends ConsumerWidget {
-  const _Rationale({required this.hint, required this.permission});
+  const _Rationale({required this.hint, required this.permission, this.upgrade});
 
   final String? hint;
   final LocationPermission permission;
+  final _Upgrade? upgrade;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -100,20 +152,45 @@ class _Rationale extends ConsumerWidget {
             child: Text(hint!, style: AppText.meta),
           ),
         ],
-        // Always reachable, in every permission state. The user has already paid; a screen they
-        // cannot leave would be the worst possible moment to trap them.
-        const SizedBox(height: 4),
-        Align(
-          alignment: Alignment.centerLeft,
-          child: TextButton(
-            onPressed: () => context.go(Routes.home),
-            style: TextButton.styleFrom(padding: EdgeInsets.zero),
-            child: Text(
-              permission.canTrack ? 'Continue' : 'Not now',
-              style: AppText.meta.copyWith(color: AppColors.brand),
+        // The background upgrade, once foreground location is in hand. Full width so it reads
+        // as a real option, outlined so it never competes with the solid blue Continue above.
+        if (upgrade != null) ...[
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            height: AppShape.buttonHeight,
+            child: OutlinedButton(
+              onPressed: upgrade!.onTap,
+              style: OutlinedButton.styleFrom(
+                side: const BorderSide(color: AppColors.brand),
+                shape: const RoundedRectangleBorder(borderRadius: AppShape.control),
+              ),
+              child: Text(
+                upgrade!.label,
+                style: AppText.pill.copyWith(color: AppColors.brand),
+              ),
             ),
           ),
-        ),
+        ],
+
+        // An escape hatch only while there is nothing to continue *to*. Once permission is
+        // granted the primary button says Continue, and a second link saying the same thing is
+        // what made the forward action ambiguous in the first place. The user has already paid,
+        // so a refusal must still never trap them here.
+        if (!permission.canTrack) ...[
+          const SizedBox(height: 4),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton(
+              onPressed: () => context.go(Routes.home),
+              style: TextButton.styleFrom(padding: EdgeInsets.zero),
+              child: Text(
+                'Not now',
+                style: AppText.meta.copyWith(color: AppColors.brand),
+              ),
+            ),
+          ),
+        ],
       ],
     );
   }

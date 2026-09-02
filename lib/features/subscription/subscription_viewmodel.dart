@@ -6,6 +6,7 @@ import '../../data/models/subscription_offer.dart';
 import '../../data/models/upi_app.dart';
 import '../../data/providers.dart';
 import '../../data/repositories/subscription_repository.dart';
+import '../payment_status/payment_outcome.dart';
 
 /// What the paywall is currently doing. Only [idle] accepts another tap.
 enum SubscriptionPhase {
@@ -156,13 +157,20 @@ class SubscriptionViewModel extends Notifier<SubscriptionState> {
     ref.read(upiAppPreferenceProvider).save(appId);
   }
 
-  /// Runs the whole purchase. Returns true only when the server confirms entitlement.
+  /// Runs the whole purchase and reports how it ended.
   ///
   /// The SDK's success callback is deliberately not treated as proof — it says the UPI app
   /// handed control back, not that ₹3 moved. Only `subscription-status`, which reconciles
   /// against Cashfree, can answer that — so every path ends by polling it.
-  Future<bool> subscribe() async {
-    if (state.busy || state.loading) return false;
+  ///
+  /// Three outcomes, not two. The poll running out after the SDK reported success is not a
+  /// failure: the money may well have moved and the webhook simply has not landed yet. That
+  /// case is [PaymentOutcome.pending], and it gets a screen that keeps asking.
+  /// Null means the tap was ignored — a second press while the first is still in flight. That
+  /// is not an outcome, and reporting it as one would throw up a failure screen over a payment
+  /// that is still running.
+  Future<PaymentOutcome?> subscribe() async {
+    if (state.busy || state.loading) return null;
 
     state = state.copyWith(phase: SubscriptionPhase.opening, clearError: true);
     final repository = ref.read(subscriptionRepositoryProvider);
@@ -173,7 +181,7 @@ class SubscriptionViewModel extends Notifier<SubscriptionState> {
       // trial or a paid month. Nothing was charged; just let them through.
       if (start.alreadyEntitled) {
         state = state.copyWith(phase: SubscriptionPhase.idle);
-        return true;
+        return PaymentOutcome.success;
       }
 
       final checkout = ref.read(cashfreeCheckoutProvider);
@@ -204,29 +212,28 @@ class SubscriptionViewModel extends Notifier<SubscriptionState> {
       // really is a cancellation and nobody wants to watch a spinner for it.
       final entitled = await _pollForEntitlement(result.verified ? 8 : 3);
 
-      if (entitled) {
-        state = state.copyWith(phase: SubscriptionPhase.idle);
-        return true;
-      }
+      state = state.copyWith(phase: SubscriptionPhase.idle);
+      if (entitled) return PaymentOutcome.success;
+
+      // The SDK said the UPI app handed control back, so a debit is plausible and the poll
+      // simply ran out first. That is not a failure, and telling the user it was is how a
+      // paying customer gets asked to pay twice.
+      if (result.verified) return PaymentOutcome.pending;
 
       state = state.copyWith(
-        phase: SubscriptionPhase.idle,
-        error: result.verified
-            ? 'We could not confirm your payment yet. If the amount was deducted your '
-                'subscription will activate shortly — try again in a minute.'
-            : result.message ?? 'The payment was not completed. Please try again.',
+        error: result.message ?? 'The payment was not completed. Please try again.',
       );
-      return false;
+      return PaymentOutcome.failed;
     } on SubscriptionException catch (e) {
       state = state.copyWith(phase: SubscriptionPhase.idle, error: e.message);
-      return false;
+      return PaymentOutcome.failed;
     } catch (error) {
       debugPrint('[subscription] purchase failed: $error');
       state = state.copyWith(
         phase: SubscriptionPhase.idle,
         error: 'Could not complete the purchase. Please try again.',
       );
-      return false;
+      return PaymentOutcome.failed;
     }
   }
 

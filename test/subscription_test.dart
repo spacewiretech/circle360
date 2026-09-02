@@ -12,6 +12,7 @@ import 'package:loc_360/data/models/upi_app.dart';
 import 'package:loc_360/data/providers.dart';
 import 'package:loc_360/data/repositories/auth_repository.dart';
 import 'package:loc_360/data/repositories/subscription_repository.dart';
+import 'package:loc_360/features/payment_status/payment_outcome.dart';
 import 'package:loc_360/features/splash/splash_viewmodel.dart';
 import 'package:loc_360/features/subscription/subscription_viewmodel.dart';
 
@@ -190,6 +191,22 @@ void main() {
     });
   });
 
+  group('PaymentOutcome.parse', () {
+    test('every slug round-trips', () {
+      for (final outcome in PaymentOutcome.values) {
+        expect(PaymentOutcome.parse(outcome.slug), outcome);
+      }
+    });
+
+    test('an unrecognised slug resolves to pending, never to a terminal answer', () {
+      // Failed would tell a paying user to pay again; success would let a non-payer in.
+      // Pending polls and corrects itself, so it is the only safe reading of "we do not know".
+      for (final slug in [null, '', 'succeeded', 'SUCCESS', 'garbage']) {
+        expect(PaymentOutcome.parse(slug), PaymentOutcome.pending, reason: 'slug: $slug');
+      }
+    });
+  });
+
   group('UpiApp.fromChannel', () {
     // A 1x1 transparent PNG.
     const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mNk'
@@ -309,7 +326,7 @@ void main() {
       final viewModel = await ready();
       repository.entitledAfterPolls = 1;
 
-      expect(await viewModel.subscribe(), isTrue);
+      expect(await viewModel.subscribe(), PaymentOutcome.success);
       expect(container.read(subscriptionViewModelProvider).error, isNull);
     });
 
@@ -338,7 +355,7 @@ void main() {
         repository.entitledAfterPolls = 1;
         viewModel.selectApp('paytm');
 
-        expect(await viewModel.subscribe(), isTrue);
+        expect(await viewModel.subscribe(), PaymentOutcome.success);
         expect(checkout.launchedAppId, 'paytm');
         expect(checkout.openCount, 0, reason: 'the Cashfree screen must not appear');
       });
@@ -363,7 +380,7 @@ void main() {
         repository.entitledAfterPolls = 1;
 
         expect(container.read(subscriptionViewModelProvider).selectedApp, isNull);
-        expect(await viewModel.subscribe(), isTrue);
+        expect(await viewModel.subscribe(), PaymentOutcome.success);
         expect(checkout.openCount, 1);
         expect(checkout.openWithAppCount, 0);
       });
@@ -371,14 +388,16 @@ void main() {
 
     test('a closed sheet is not treated as payment until the server agrees', () async {
       final viewModel = await ready();
-      // The SDK reports success but the server never confirms — exactly what a mandate that
-      // failed after the UPI handoff looks like.
+      // The SDK reports success but the server never confirms inside the poll window. The
+      // money may well have moved, so this is pending rather than failed — calling it a
+      // failure is how a paying customer gets told to pay again.
       repository.entitledAfterPolls = null;
 
-      expect(await viewModel.subscribe(), isFalse);
+      expect(await viewModel.subscribe(), PaymentOutcome.pending);
       expect(
         container.read(subscriptionViewModelProvider).error,
-        contains('could not confirm'),
+        isNull,
+        reason: 'pending is not an error; the status screen explains the wait',
       );
       expect(repository.pollCount, greaterThan(1), reason: 'it should keep asking');
     });
@@ -388,7 +407,7 @@ void main() {
       checkout.result = const CheckoutResult(CheckoutOutcome.failed, 'Cancelled.');
       repository.entitledAfterPolls = 1;
 
-      expect(await viewModel.subscribe(), isTrue,
+      expect(await viewModel.subscribe(), PaymentOutcome.success,
           reason: 'the UPI app can approve even when the sheet reports failure');
     });
 
@@ -396,7 +415,7 @@ void main() {
       final viewModel = await ready();
       repository.startResult = const SubscriptionStart.entitled();
 
-      expect(await viewModel.subscribe(), isTrue);
+      expect(await viewModel.subscribe(), PaymentOutcome.success);
       expect(checkout.opened, isFalse, reason: 'no sheet, so nothing can be charged twice');
     });
 
@@ -404,7 +423,7 @@ void main() {
       final viewModel = await ready();
       repository.startError = const SubscriptionException('Payments are unavailable.');
 
-      expect(await viewModel.subscribe(), isFalse);
+      expect(await viewModel.subscribe(), PaymentOutcome.failed);
       expect(
         container.read(subscriptionViewModelProvider).error,
         'Payments are unavailable.',
@@ -419,7 +438,7 @@ void main() {
       final first = viewModel.subscribe();
       final second = await viewModel.subscribe();
 
-      expect(second, isFalse, reason: 'one mandate per tap-through, not one per tap');
+      expect(second, isNull, reason: 'one mandate per tap-through, not one per tap');
       await first;
       // Counted across both routes — which one ran depends on whether a UPI app is installed,
       // and neither may run twice.

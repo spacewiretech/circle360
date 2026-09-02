@@ -166,9 +166,14 @@ class LocationController extends Notifier<LocationState> {
   /// Android 11+ and iOS both put "always" behind their own flow; native routes to Settings
   /// where a runtime prompt would be silently denied.
   Future<void> requestBackgroundPermission() async {
-    state = state.copyWith(busy: true);
+    state = state.copyWith(busy: true, clearError: true);
     try {
       state = state.copyWith(status: await _service.requestBackgroundPermission());
+      // On Android 11+ the call above only *opens* Settings and answers with the status as it
+      // was before the user got there, so what it returned is already stale. Re-ask. The
+      // screen's resume handler covers the case where they take their time in Settings; this
+      // covers the runtime-prompt path, where the answer is in by the time we get here.
+      await refresh();
     } on Object catch (error) {
       debugPrint('[location] requestBackgroundPermission failed: $error');
     } finally {
@@ -206,7 +211,14 @@ class LocationController extends Notifier<LocationState> {
     }
   }
 
-  Future<void> openAppSettings() => _service.openAppSettings();
+  /// Opens the OS settings page, then re-reads what the user did there.
+  ///
+  /// The refresh matters for callers with no lifecycle observer of their own — without it the
+  /// permission a user just granted in Settings is invisible until something else asks.
+  Future<void> openAppSettings() async {
+    await _service.openAppSettings();
+    await refresh();
+  }
 
   Future<void> requestIgnoreBatteryOptimizations() =>
       _service.requestIgnoreBatteryOptimizations();

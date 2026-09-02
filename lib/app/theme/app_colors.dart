@@ -27,8 +27,18 @@ abstract final class AppColors {
   /// Chip fill behind the dismiss action on emergency contacts.
   static const chipBlue = Color(0xFFE0ECFE);
 
-  /// "Online" dot on avatars.
+  /// "Online" dot on avatars, and the tick on the payment-success screen.
   static const presence = Color(0xFF07B819);
+
+  /// Payment outcome accents. Only the status screens use these — a failed charge is the one
+  /// place in the app that earns a red, and it must not be mistaken for the brand blue.
+  static const danger = Color(0xFFFA2600);
+  static const warning = Color(0xFFFFC800);
+
+  /// Barely-there grounds behind the success and failure screens, so the outcome reads before
+  /// the copy does.
+  static const successBg = Color(0xFFF7FDF9);
+  static const dangerBg = Color(0xFFFFFDFC);
 
   /// Translucent fill behind circular back buttons sitting over the map.
   static const scrim = Color(0x3DDDDEDF);

@@ -46,7 +46,6 @@ dependencies:
   supabase_flutter: ^2.17.2
   flutter_secure_storage: ^11.0.0
   shared_preferences: ^2.5.5
-  flutter_launcher_icons: ^0.14.4
   # Cashfree UPI Autopay checkout. Only ever handed a session id minted by an Edge Function —
   # no Cashfree credential reaches the device.
   flutter_cashfree_pg_sdk: ^2.4.0
@@ -60,12 +59,8 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
 
-flutter_launcher_icons:
-  android: true
-  ios: true
-  image_path: "assets/images/logo_pin.png"
-  adaptive_icon_background: "#FFFFFF"
-  adaptive_icon_foreground: "assets/images/logo_pin.png"
+  # Build-time only: it generates the launcher icons and is never imported by the app.
+  flutter_launcher_icons: ^0.14.4
 
   # The "flutter_lints" package below contains a set of recommended lints to
   # encourage good coding practices. The lint set provided by the package is
@@ -73,6 +68,17 @@ flutter_launcher_icons:
   # package. See that file for information about deactivating specific lint
   # rules and activating additional ones.
   flutter_lints: ^6.0.0
+
+# Launcher icons, regenerated with `dart run flutter_launcher_icons`.
+#
+# Top-level, not nested under dev_dependencies — the tool reads this as its own root key, and
+# indenting it one level deeper silently swallows whatever follows it.
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/images/logo_pin.png"
+  adaptive_icon_background: "#FFFFFF"
+  adaptive_icon_foreground: "assets/images/logo_pin.png"
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec

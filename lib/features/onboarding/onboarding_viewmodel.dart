@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/entitlement.dart';
@@ -18,6 +19,10 @@ import 'onboarding_state.dart';
 /// never touches the router.
 class OnboardingViewModel extends Notifier<OnboardingState> {
   Timer? _ticker;
+
+  /// Debug-only sign-in shortcut. See the guard in [verifyOtp].
+  static const _devPhone = '9931133385';
+  static const _devUserId = 'cdcb6ecf-a426-49b8-a52b-b745510ed877';
 
   @override
   OnboardingState build() {
@@ -79,15 +84,22 @@ class OnboardingViewModel extends Notifier<OnboardingState> {
     state = state.copyWith(busy: true, clearError: true);
 
     try {
-      if(state.phone == "9931133385"){
+      // Dev shortcut: skips the OTP round trip for one hard-coded number.
+      //
+      // Gated on kDebugMode because it is a sign-in that never reaches the server — no session
+      // token is minted, so every authed call afterwards would fail anyway, and in a release
+      // build it would just be a number that puts the app into a broken half-signed-in state.
+      // The compiler drops this whole branch from release output.
+      if (kDebugMode && state.phone == _devPhone) {
         _ticker?.cancel();
-        final destination = await _destinationFor(AppUser(id: "cdcb6ecf-a426-49b8-a52b-b745510ed877", phone: "9931133385", name: "Dev"));
+        final destination = await _destinationFor(
+          const AppUser(id: _devUserId, phone: _devPhone, name: 'Dev'),
+        );
         state = state.copyWith(busy: false);
         return destination;
       }
       final user = await _auth.verifyOtp(phone: state.phone, code: state.code);
       _ticker?.cancel();
-      print("userId: ${user.id}, ${user.phone}");
       final destination = await _destinationFor(user);
       state = state.copyWith(busy: false);
       return destination;

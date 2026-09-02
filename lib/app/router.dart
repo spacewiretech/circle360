@@ -8,6 +8,8 @@ import '../features/location/location_permission_view.dart';
 import '../features/onboarding/name_view.dart';
 import '../features/onboarding/otp_view.dart';
 import '../features/onboarding/phone_view.dart';
+import '../features/payment_status/payment_outcome.dart';
+import '../features/payment_status/payment_status_view.dart';
 import '../features/profile/profile_view.dart';
 import '../features/settings/settings_view.dart';
 import '../features/splash/splash_view.dart';
@@ -22,7 +24,13 @@ abstract final class Routes {
   static const otp = '/otp';
   static const name = '/name';
   static const subscribe = '/subscribe';
+
+  /// `:outcome` is a [PaymentOutcome] slug. Use [paymentStatusFor] to build one.
+  static const paymentStatus = '/payment-status/:outcome';
   static const location = '/location';
+
+  static String paymentStatusFor(PaymentOutcome outcome) =>
+      '/payment-status/${outcome.slug}';
   static const home = '/home';
   static const emergency = '/emergency';
   static const profile = '/profile';
@@ -54,6 +62,16 @@ final appRouter = GoRouter(
     GoRoute(path: Routes.otp, builder: (context, state) => const OtpView()),
     GoRoute(path: Routes.name, builder: (context, state) => const NameView()),
     GoRoute(path: Routes.subscribe, builder: (context, state) => const SubscriptionView()),
+
+    // Ungated: a failed or pending payment is precisely the case where the user is not
+    // entitled, so wrapping this in EntitlementGate would bounce them straight back to the
+    // paywall they just came from and they would never see the outcome.
+    GoRoute(
+      path: Routes.paymentStatus,
+      builder: (context, state) => PaymentStatusView(
+        outcome: PaymentOutcome.parse(state.pathParameters['outcome']),
+      ),
+    ),
 
     // Gated like the rest of the paid app, but not itself a gate: it always offers a way
     // through to Home, whatever the user answers.

@@ -40,12 +40,13 @@ class SubscriptionView extends ConsumerWidget {
   }
 
   Future<void> _subscribe(BuildContext context, WidgetRef ref) async {
-    final ok = await ref.read(subscriptionViewModelProvider.notifier).subscribe();
-    if (!ok || !context.mounted) return;
-    // Straight to the location step rather than Home: this is the one moment the user has
-    // just chosen to be here, which is the best chance the permission prompt will ever get.
-    // The step itself is skippable, and the splash routes past it once it has been answered.
-    context.go(Routes.location);
+    final outcome = await ref.read(subscriptionViewModelProvider.notifier).subscribe();
+    if (outcome == null || !context.mounted) return;
+    // Every outcome gets its own screen, failures included. A payment that is still settling
+    // used to be an error string on this sheet with no route forward; now it is a screen whose
+    // job is to keep asking. The success screen carries on to the location step, which is the
+    // one moment the user has just chosen to be here.
+    context.go(Routes.paymentStatusFor(outcome));
   }
 
   @override
