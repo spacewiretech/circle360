@@ -17,10 +17,13 @@ import {
   CashfreeSettings,
   fetchSubscription,
   fetchSubscriptionPayments,
+  isDisputeLost,
   isLiveStatus,
   snapshotOf,
   SubscriptionSnapshot,
+  WebhookDispute,
   WebhookPayment,
+  WebhookRefund,
 } from "./cashfree.ts";
 import { asUserRow, USER_COLUMNS, UserRow } from "./entitlement.ts";
 
@@ -537,4 +540,164 @@ export function isResumable(row: SubscriptionRow): boolean {
   if (!row.session_id || !row.session_expiry) return false;
   if (!isLiveStatus(row.status) || row.status === "ACTIVE") return false;
   return new Date(row.session_expiry).getTime() > Date.now();
+}
+
+// ---------------------------------------------------------------- refunds & disputes
+
+/**
+ * Finds the subscription a payment-scoped event belongs to.
+ *
+ * Refunds and disputes name a *payment*, never a subscription, which is why they used to be
+ * recorded and then dropped. The ledger already ties every charge to its mandate, so the link
+ * is one lookup away.
+ */
+export async function subscriptionForPayment(
+  db: SupabaseClient,
+  cfPaymentId: string,
+): Promise<{ subscriptionPk: string | null; userId: string | null } | null> {
+  const { data } = await db
+    .from("subscription_payments")
+    .select("id, subscription_pk, user_id")
+    .eq("cf_payment_id", cfPaymentId)
+    .maybeSingle();
+
+  if (!data) return null;
+  return {
+    subscriptionPk: (data.subscription_pk as string | null) ?? null,
+    userId: (data.user_id as string | null) ?? null,
+  };
+}
+
+/**
+ * Records a refund and, when money actually went back, re-derives the paid period.
+ *
+ * Recomputed from the remaining un-refunded charges rather than subtracting a month. Subtraction
+ * has to be applied exactly once and cannot survive a redelivery or an out-of-order arrival;
+ * recomputation converges on the same answer however many times it runs, which is the same rule
+ * the rest of this module follows.
+ */
+export async function recordRefund(
+  db: SupabaseClient,
+  refund: WebhookRefund,
+): Promise<void> {
+  const link = refund.cfPaymentId
+    ? await subscriptionForPayment(db, refund.cfPaymentId)
+    : null;
+
+  const { error } = await db.from("subscription_refunds").upsert({
+    payment_pk: link?.subscriptionPk ?? null,
+    user_id: link?.userId ?? null,
+    cf_refund_id: refund.cfRefundId,
+    cf_payment_id: refund.cfPaymentId,
+    amount: refund.amount,
+    currency: refund.currency,
+    status: refund.status,
+    reason: refund.reason,
+    refund_time: refund.refundTime,
+    raw: refund.raw,
+  }, { onConflict: "cf_refund_id" });
+
+  if (error) throw new Error(`subscription_refunds upsert failed: ${error.message}`);
+
+  const userId = link?.userId;
+  if (!userId || refund.status !== "SUCCESS") return;
+
+  await recomputePaidPeriod(db, userId);
+  await refreshPaymentTotals(db, userId);
+}
+
+/**
+ * Re-derives `current_period_end` from the charges that still stand.
+ *
+ * A month of access is owed for each successful recurring charge that has not been refunded,
+ * measured from the most recent one. With none left the user keeps whatever the trial gave them
+ * and lapses on that clock instead.
+ */
+async function recomputePaidPeriod(db: SupabaseClient, userId: string): Promise<void> {
+  const { data: refunded } = await db
+    .from("subscription_refunds")
+    .select("cf_payment_id")
+    .eq("user_id", userId)
+    .eq("status", "SUCCESS");
+
+  const reversed = new Set(
+    (refunded ?? []).map((r) => r.cf_payment_id as string).filter(Boolean),
+  );
+
+  const { data: charges } = await db
+    .from("subscription_payments")
+    .select("cf_payment_id, payment_time, created_at")
+    .eq("user_id", userId)
+    .eq("kind", "RECURRING")
+    .eq("status", "SUCCESS");
+
+  const standing = (charges ?? [])
+    .filter((c) => !reversed.has(c.cf_payment_id as string))
+    .map((c) => (c.payment_time ?? c.created_at) as string)
+    .filter(Boolean)
+    .sort();
+
+  const latest = standing.at(-1);
+
+  if (!latest) {
+    // Every paid month has been given back. Fall back to the trial clock rather than leaving a
+    // period end nothing paid for; `expired` is not set here because the trial may still run.
+    await db.from("users").update({ current_period_end: null }).eq("user_id", userId);
+    return;
+  }
+
+  await db
+    .from("users")
+    .update({ current_period_end: addMonths(new Date(latest), 1).toISOString() })
+    .eq("user_id", userId);
+}
+
+/**
+ * Records a chargeback. Access is taken away only once one is actually lost.
+ *
+ * An opened dispute is usually a bank's automated query and is often resolved in the merchant's
+ * favour; revoking on creation would punish the user for it. Until it settles the account is
+ * flagged through `billing_state` and nothing else changes.
+ */
+export async function recordDispute(
+  db: SupabaseClient,
+  dispute: WebhookDispute,
+): Promise<void> {
+  const link = dispute.cfPaymentId
+    ? await subscriptionForPayment(db, dispute.cfPaymentId)
+    : null;
+
+  const { error } = await db.from("payment_disputes").upsert({
+    user_id: link?.userId ?? null,
+    cf_dispute_id: dispute.cfDisputeId,
+    cf_payment_id: dispute.cfPaymentId,
+    amount: dispute.amount,
+    currency: dispute.currency,
+    status: dispute.status,
+    dispute_type: dispute.disputeType,
+    reason: dispute.reason,
+    respond_by: dispute.respondBy,
+    raw: dispute.raw,
+  }, { onConflict: "cf_dispute_id" });
+
+  if (error) throw new Error(`payment_disputes upsert failed: ${error.message}`);
+
+  const userId = link?.userId;
+  if (!userId) return;
+
+  if (isDisputeLost(dispute.status)) {
+    // The money is gone, so the month it bought is gone with it.
+    await db.from("users").update({ billing_state: "disputed" }).eq("user_id", userId);
+    await recomputePaidPeriod(db, userId);
+    return;
+  }
+
+  // Still open, or resolved our way. Flag while open; clear the flag once it closes.
+  const open = !dispute.status.toUpperCase().includes("WON") &&
+    !dispute.status.toUpperCase().includes("CLOSED");
+
+  await db
+    .from("users")
+    .update({ billing_state: open ? "disputed" : null })
+    .eq("user_id", userId);
 }

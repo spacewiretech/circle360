@@ -225,6 +225,9 @@ class SubscriptionViewModel extends Notifier<SubscriptionState> {
       );
       return PaymentOutcome.failed;
     } on SubscriptionException catch (e) {
+      // Distinguishable in the log from an SDK failure: this one never reached Cashfree's
+      // checkout at all, so no UPI app was ever going to open.
+      debugPrint('[subscription] server refused to start the mandate: ${e.message}');
       state = state.copyWith(phase: SubscriptionPhase.idle, error: e.message);
       return PaymentOutcome.failed;
     } catch (error) {

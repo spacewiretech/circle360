@@ -536,3 +536,125 @@ function paymentFromRow(data: Record<string, unknown>): WebhookPayment | null {
     raw: data,
   };
 }
+
+// ---------------------------------------------------------------- refunds & disputes
+
+/**
+ * Pulls the first object that has [key] out of the handful of places Cashfree nests things.
+ *
+ * Payload shapes differ per event type *and* per API version, and there is no version of this
+ * worth writing as a switch: the alternative is a per-event parser that breaks silently the
+ * next time a shape moves. Walking a short list of candidates and taking the first hit degrades
+ * to "we could not read it" instead.
+ */
+function blockWith(
+  payload: Record<string, unknown>,
+  key: string,
+): Record<string, unknown> | null {
+  const data = (payload.data ?? {}) as Record<string, unknown>;
+  const candidates: unknown[] = [
+    data.refund,
+    data.dispute,
+    data.dispute_details,
+    data.order_details,
+    data,
+    payload,
+  ];
+
+  for (const candidate of candidates) {
+    if (candidate && typeof candidate === "object" && !Array.isArray(candidate)) {
+      const row = candidate as Record<string, unknown>;
+      if (row[key] != null) return row;
+    }
+  }
+  return null;
+}
+
+/** A refund, for the events that carry one. Null when the payload is not about a refund. */
+export interface WebhookRefund {
+  cfRefundId: string;
+  /** The charge being reversed. This is what ties a refund back to a subscription. */
+  cfPaymentId: string | null;
+  amount: number | null;
+  currency: string;
+  status: string;
+  reason: string | null;
+  refundTime: string | null;
+  raw: Record<string, unknown>;
+}
+
+export function refundFrom(payload: Record<string, unknown>): WebhookRefund | null {
+  const row = blockWith(payload, "cf_refund_id") ?? blockWith(payload, "refund_id");
+  if (!row) return null;
+
+  const id = row.cf_refund_id ?? row.refund_id;
+  if (id == null) return null;
+
+  return {
+    cfRefundId: String(id),
+    cfPaymentId: row.cf_payment_id != null ? String(row.cf_payment_id) : null,
+    amount: numberOrNull(row.refund_amount ?? row.amount),
+    currency: typeof row.refund_currency === "string" ? row.refund_currency : "INR",
+    status: typeof row.refund_status === "string" ? row.refund_status : "UNKNOWN",
+    reason: typeof row.refund_note === "string"
+      ? row.refund_note
+      : typeof row.refund_reason === "string"
+      ? row.refund_reason
+      : null,
+    refundTime: parseDate(row.processed_at ?? row.refund_time ?? row.created_at),
+    raw: row,
+  };
+}
+
+/** A chargeback or dispute. */
+export interface WebhookDispute {
+  cfDisputeId: string;
+  cfPaymentId: string | null;
+  amount: number | null;
+  currency: string;
+  status: string;
+  disputeType: string | null;
+  reason: string | null;
+  respondBy: string | null;
+  raw: Record<string, unknown>;
+}
+
+export function disputeFrom(payload: Record<string, unknown>): WebhookDispute | null {
+  const row = blockWith(payload, "cf_dispute_id") ?? blockWith(payload, "dispute_id");
+  if (!row) return null;
+
+  const id = row.cf_dispute_id ?? row.dispute_id;
+  if (id == null) return null;
+
+  // The payment can sit beside the dispute or inside its order block.
+  const order = (row.order_details ?? {}) as Record<string, unknown>;
+  const cfPaymentId = row.cf_payment_id ?? order.cf_payment_id;
+
+  return {
+    cfDisputeId: String(id),
+    cfPaymentId: cfPaymentId != null ? String(cfPaymentId) : null,
+    amount: numberOrNull(row.dispute_amount ?? row.amount),
+    currency: typeof row.dispute_currency === "string" ? row.dispute_currency : "INR",
+    status: typeof row.dispute_status === "string" ? row.dispute_status : "UNKNOWN",
+    disputeType: typeof row.dispute_type === "string" ? row.dispute_type : null,
+    reason: typeof row.reason_description === "string"
+      ? row.reason_description
+      : typeof row.reason_code === "string"
+      ? row.reason_code
+      : null,
+    respondBy: parseDate(row.respond_by ?? row.respond_by_date),
+    raw: row,
+  };
+}
+
+/**
+ * Whether a dispute has been settled against us.
+ *
+ * Only a lost dispute takes access away. A dispute merely being *opened* must not: most are
+ * resolved in the merchant's favour, and revoking on creation would punish a user for a bank's
+ * automated query. `billing_state` is what flags the account in the meantime.
+ */
+export function isDisputeLost(status: string): boolean {
+  const normalised = status.toUpperCase();
+  return normalised.includes("LOST") || normalised.includes("CHARGEBACK_ACCEPTED");
+}

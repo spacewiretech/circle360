@@ -53,7 +53,7 @@ class _PhoneViewState extends ConsumerState<PhoneView> {
     final heroWidth = MediaQuery.sizeOf(context).width * PhoneView._heroWidthRatio;
 
     return OnboardingScaffold(hero: Image.asset(
-      Img.inviteHero,
+      Img.inviteHeroWeb,
       width: heroWidth,
       // Height follows the asset's own aspect; the sheet crops whatever hangs below.
       fit: BoxFit.fitWidth,

@@ -1,7 +1,9 @@
 import {
   cashfreeSettings,
   dedupeKey,
+  disputeFrom,
   paymentFrom,
+  refundFrom,
   subscriptionIdsFrom,
   verifyWebhook,
 } from "../_shared/cashfree.ts";
@@ -10,7 +12,9 @@ import { corsHeaders, json } from "../_shared/cors.ts";
 import { serviceClient } from "../_shared/db.ts";
 import {
   asSubscriptionRow,
+  recordDispute,
   recordPayment,
+  recordRefund,
   SUBSCRIPTION_COLUMNS,
   syncSubscription,
 } from "../_shared/subscription_sync.ts";
@@ -160,10 +164,30 @@ Deno.serve(async (req) => {
       subscriptionId = (data?.subscription_id as string | undefined) ?? null;
     }
 
+    // Payment-scoped events — refunds and disputes — name no subscription, only a payment. The
+    // ledger ties every charge to its mandate, so they resolve through that instead. Handled
+    // before the subscription branch because they will never satisfy it.
+    const refund = refundFrom(payload);
+    if (refund) {
+      await recordRefund(db, refund);
+      await finish();
+      return ok({ handled: true, event: eventType, kind: "refund" });
+    }
+
+    const dispute = disputeFrom(payload);
+    if (dispute) {
+      await recordDispute(db, dispute);
+      await finish();
+      return ok({ handled: true, event: eventType, kind: "dispute" });
+    }
+
     if (!subscriptionId) {
-      // Refund and reminder events that name no subscription we own. Recorded, not acted on.
-      await finish("no subscription id in payload");
-      return ok({ ignored: true, event: eventType });
+      // Everything else that names nothing we own: one-time PG order events (this app opens no
+      // orders), settlement notices, pre-debit reminders. Recorded in payment_events and
+      // acknowledged, because a 200 is what stops Cashfree retrying an event we will never act
+      // on — and marking it processed is what stops it being retried forever.
+      await finish();
+      return ok({ ignored: true, event: eventType, reason: "no subscription, refund or dispute" });
     }
 
     const { data: subscriptionRow } = await db

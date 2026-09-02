@@ -20,6 +20,48 @@ enum PaymentType {
   }
 }
 
+/// Why a live subscription is unhappy, when it is.
+///
+/// Separate from [PaymentType] on purpose. These states do not change whether the user is let
+/// in — they are still fully entitled until the paid period runs out — but they are the only
+/// warning anyone gets that it is about to stop. Folding them into [PaymentType] would mean the
+/// parser's fallthrough revoked access from exactly the people being warned.
+enum BillingState {
+  /// The bank has suspended the mandate; renewals will not be collected until it is fixed.
+  onHold,
+
+  /// Paused, either by the user or by Cashfree.
+  paused,
+
+  /// A renewal failed and is being retried.
+  dunning,
+
+  /// A chargeback is open against one of their payments.
+  disputed;
+
+  static BillingState? parse(Object? value) => switch (value) {
+        'on_hold' => BillingState.onHold,
+        'paused' => BillingState.paused,
+        'dunning' => BillingState.dunning,
+        'disputed' => BillingState.disputed,
+        _ => null,
+      };
+
+  /// What to tell the user, and what they can do about it.
+  String get message => switch (this) {
+        BillingState.onHold =>
+          'Your UPI mandate is on hold, so the next payment will not go through. '
+              'Re-authorise it in your UPI app to keep sharing.',
+        BillingState.paused =>
+          'Your subscription is paused. Renew it to keep location sharing on.',
+        BillingState.dunning =>
+          'The last payment did not go through. We will retry it shortly.',
+        BillingState.disputed =>
+          'There is a payment dispute open on your account. Contact support if this is '
+              'unexpected.',
+      };
+}
+
 @immutable
 class AppUser {
   const AppUser({
@@ -32,6 +74,7 @@ class AppUser {
     this.trialEndsAt,
     this.currentPeriodEnd,
     this.entitled = false,
+    this.billingState,
   });
 
   final String id;
@@ -56,6 +99,10 @@ class AppUser {
   /// Computed by the server. The client never decides this while it is online — see
   /// [recomputeOffline] for the one case where it has to derive the answer itself.
   final bool entitled;
+
+  /// Set when the mandate needs attention. Null is the healthy case, and it never affects
+  /// [entitled] — this is a warning, not a gate.
+  final BillingState? billingState;
 
   bool get hasName => name.trim().isNotEmpty;
 
@@ -124,6 +171,7 @@ class AppUser {
       trialEndsAt: _parseDate(raw['trial_ends_at']),
       currentPeriodEnd: _parseDate(raw['current_period_end']),
       entitled: raw['entitled'] == true,
+      billingState: BillingState.parse(raw['billing_state']),
     );
   }
 
@@ -140,6 +188,9 @@ class AppUser {
     DateTime? trialEndsAt,
     DateTime? currentPeriodEnd,
     bool? entitled,
+    BillingState? billingState,
+    /// Explicit, because null is a meaningful value here — it means the mandate recovered.
+    bool clearBillingState = false,
   }) {
     return AppUser(
       id: id,
@@ -151,6 +202,8 @@ class AppUser {
       trialEndsAt: trialEndsAt ?? this.trialEndsAt,
       currentPeriodEnd: currentPeriodEnd ?? this.currentPeriodEnd,
       entitled: entitled ?? this.entitled,
+      billingState:
+          clearBillingState ? null : (billingState ?? this.billingState),
     );
   }
 }

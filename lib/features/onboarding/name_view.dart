@@ -50,7 +50,7 @@ class _NameViewState extends ConsumerState<NameView> {
 
     return OnboardingScaffold(
       hero: Image.asset(
-        Img.inviteHero,
+        Img.inviteHeroWeb,
         width: heroWidth,
         // Height follows the asset's own aspect; the sheet crops whatever hangs below.
         fit: BoxFit.fitWidth,

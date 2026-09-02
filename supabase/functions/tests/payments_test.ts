@@ -14,8 +14,11 @@ import {
   addMonths,
   CashfreeSettings,
   dedupeKey,
+  disputeFrom,
+  isDisputeLost,
   isLiveStatus,
   paymentFrom,
+  refundFrom,
   snapshotOf,
   subscriptionIdsFrom,
   toIstIso,
@@ -312,4 +315,80 @@ Deno.test("adding a month clamps rather than skipping one", () => {
   assertEquals(addMonths(new Date("2026-01-31T00:00:00Z"), 1).toISOString().slice(0, 10), "2026-02-28");
   assertEquals(addMonths(new Date("2026-03-31T00:00:00Z"), 1).toISOString().slice(0, 10), "2026-04-30");
   assertEquals(addMonths(new Date("2026-09-15T00:00:00Z"), 1).toISOString().slice(0, 10), "2026-10-15");
+});
+
+// ---------------------------------------------------------------- refunds & disputes
+
+Deno.test("a refund is read out of the nested refund block", () => {
+  const refund = refundFrom({
+    type: "REFUND_STATUS_WEBHOOK",
+    data: {
+      refund: {
+        cf_refund_id: 8812,
+        cf_payment_id: 5566,
+        refund_amount: 499,
+        refund_currency: "INR",
+        refund_status: "SUCCESS",
+        refund_note: "customer request",
+        processed_at: "2026-09-10T09:00:00Z",
+      },
+    },
+  });
+
+  assertEquals(refund?.cfRefundId, "8812");
+  assertEquals(refund?.cfPaymentId, "5566");
+  assertEquals(refund?.amount, 499);
+  assertEquals(refund?.status, "SUCCESS");
+  assertEquals(refund?.reason, "customer request");
+});
+
+Deno.test("a subscription event is not mistaken for a refund", () => {
+  // The webhook tries the refund extractor on every payload, so a false positive here would
+  // divert a real charge into the refund path.
+  assertEquals(
+    refundFrom({ type: "SUBSCRIPTION_PAYMENT_SUCCESS", data: { cf_payment_id: 1 } }),
+    null,
+  );
+  assertEquals(disputeFrom({ type: "SUBSCRIPTION_PAYMENT_SUCCESS", data: { cf_payment_id: 1 } }), null);
+});
+
+Deno.test("a dispute finds its payment inside the order block", () => {
+  const dispute = disputeFrom({
+    type: "DISPUTE_CREATED",
+    data: {
+      dispute: {
+        cf_dispute_id: 991,
+        dispute_amount: 499,
+        dispute_type: "CHARGEBACK",
+        dispute_status: "DISPUTE_CREATED",
+        reason_description: "Services not rendered",
+        respond_by: "2026-09-20T00:00:00Z",
+        order_details: { order_id: "o1", cf_payment_id: 5566 },
+      },
+    },
+  });
+
+  assertEquals(dispute?.cfDisputeId, "991");
+  assertEquals(dispute?.cfPaymentId, "5566");
+  assertEquals(dispute?.disputeType, "CHARGEBACK");
+  assertEquals(dispute?.respondBy, "2026-09-20T00:00:00.000Z");
+});
+
+Deno.test("only a lost dispute costs the user their access", () => {
+  // Opening one must not revoke: most are resolved in the merchant's favour, and a bank's
+  // automated query is not the user's fault.
+  assertFalse(isDisputeLost("DISPUTE_CREATED"));
+  assertFalse(isDisputeLost("DISPUTE_UNDER_REVIEW"));
+  assertFalse(isDisputeLost("DISPUTE_MERCHANT_WON"));
+  assert(isDisputeLost("DISPUTE_MERCHANT_LOST"));
+  assert(isDisputeLost("CHARGEBACK_ACCEPTED"));
+});
+
+Deno.test("an unreadable refund payload yields null rather than throwing", () => {
+  // The webhook runs these extractors on every delivery, including ones for products this app
+  // does not use. They must never be the reason a delivery 500s.
+  assertEquals(refundFrom({}), null);
+  assertEquals(disputeFrom({}), null);
+  assertEquals(refundFrom({ data: null }), null);
+  assertEquals(disputeFrom({ data: "nonsense" }), null);
 });

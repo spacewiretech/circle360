@@ -10,6 +10,7 @@ import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_theme.dart';
 import '../../app/theme/app_typography.dart';
 import '../../widgets/primary_button.dart';
+import '../subscription/subscription_viewmodel.dart';
 import 'payment_outcome.dart';
 import 'payment_status_viewmodel.dart';
 
@@ -86,6 +87,13 @@ class _PaymentStatusViewState extends ConsumerState<PaymentStatusView>
 
     final pending = ref.watch(paymentStatusViewModelProvider);
 
+    // Why this particular payment failed. The paywall's notifier outlives the navigation here,
+    // so the message it recorded — a Cashfree rejection, or one of our own refusals like "too
+    // many attempts" — is still readable. Without it this screen could only ever offer the
+    // static guesses in [_Causes], which is how a perfectly explicable failure ("please add
+    // your name before subscribing") became "payment declined by your bank".
+    final reason = ref.watch(subscriptionViewModelProvider.select((state) => state.error));
+
     return PopScope(
       // Back would land on the paywall, which is either wrong (they have paid) or a dead end
       // (the mandate is still settling). Every outcome offers its own way on.
@@ -98,7 +106,10 @@ class _PaymentStatusViewState extends ConsumerState<PaymentStatusView>
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Spacer(flex: outcome.topFlex),
+                // Guarded, not asserted away: Spacer rejects a flex of 0, and "no spacer at
+                // this end" is a layout the frames genuinely ask for — it is what pins the
+                // failed screen's button to the bottom.
+                if (outcome.topFlex > 0) Spacer(flex: outcome.topFlex),
                 Center(child: outcome.mark),
                 const SizedBox(height: 30),
                 Text(outcome.heading, style: AppText.display, textAlign: TextAlign.center),
@@ -106,7 +117,7 @@ class _PaymentStatusViewState extends ConsumerState<PaymentStatusView>
                 Text(outcome.body, style: AppText.body, textAlign: TextAlign.center),
                 if (widget.outcome == PaymentOutcome.failed) ...[
                   const Spacer(flex: 3),
-                  const _Causes(),
+                  if (reason != null) _Reason(reason) else const _Causes(),
                   const SizedBox(height: 20),
                   PrimaryButton(
                     label: 'Retry Payment',
@@ -130,7 +141,7 @@ class _PaymentStatusViewState extends ConsumerState<PaymentStatusView>
                     ),
                   ],
                 ],
-                Spacer(flex: outcome.bottomFlex),
+                if (outcome.bottomFlex > 0) Spacer(flex: outcome.bottomFlex),
               ],
             ),
           ),
@@ -158,6 +169,9 @@ class _Outcome {
 
   /// The frames do not sit the mark at the same height: failed is top-weighted because it
   /// carries a reasons box and a button underneath, the other two sit nearer the middle.
+  ///
+  /// Zero means "no spacer at this end", which is how the failed frame pins its button to the
+  /// bottom. It is not a flex value — [Spacer] asserts on one — so the build guards on it.
   final int topFlex;
   final int bottomFlex;
 
@@ -260,10 +274,44 @@ class _DashedRingPainter extends CustomPainter {
   bool shouldRepaint(_DashedRingPainter oldDelegate) => false;
 }
 
+/// What actually went wrong, when we know.
+///
+/// Most of these messages are our own — "too many attempts", "please add your name before
+/// subscribing" — and every one of them is more use than a guess. The gateway's own wording is
+/// admittedly not always plain English, but a user who can quote it to support is far better
+/// off than one who was shown three reasons that had nothing to do with their payment.
+class _Reason extends StatelessWidget {
+  const _Reason(this.message);
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
+      decoration: BoxDecoration(
+        borderRadius: AppShape.control,
+        border: Border.all(color: AppColors.danger.withValues(alpha: 0.4)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(Icons.info_outline, size: 18, color: AppColors.danger),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(message, style: AppText.body.copyWith(color: AppColors.heading)),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 /// The three things that usually went wrong.
 ///
-/// Static on purpose: Cashfree's own failure_reason is recorded server-side for support, but it
-/// is gateway wording and often means nothing to the person reading it.
+/// The fallback for the case where nothing more specific reached us — a result that arrived
+/// after the app was killed and restarted, or a deeplink straight onto this screen.
 class _Causes extends StatelessWidget {
   const _Causes();
 

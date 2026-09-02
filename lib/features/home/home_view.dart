@@ -9,6 +9,7 @@ import '../../app/router.dart';
 import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_theme.dart';
 import '../../app/theme/app_typography.dart';
+import '../../data/entitlement.dart';
 import '../../data/fake/fake_session.dart';
 import '../../data/location/location_controller.dart';
 import '../../location_service.dart';
@@ -210,10 +211,23 @@ class _StatusStrip extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final problem = location.problem;
+    // A mandate that has stalled. Shown above the location banner because it is the more
+    // urgent of the two: location can be turned back on any time, but a subscription only
+    // stays fixable until the paid period runs out. The user is still fully entitled here —
+    // this is the warning that gives them a chance to act before that changes.
+    final billing = ref.watch(entitlementProvider)?.billingState;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        if (billing != null) ...[
+          TrackingBanner(
+            message: billing.message,
+            actionLabel: 'Manage',
+            onTap: () => context.push(Routes.settings),
+          ),
+          const SizedBox(height: 8),
+        ],
         if (problem != null)
           TrackingBanner(
             message: problem,

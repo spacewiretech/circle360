@@ -6,11 +6,11 @@ import '../app/assets.dart';
 /// live; nothing else in `lib/website/` hard-codes an address, an email or a store URL.
 abstract final class SitePlaceholders {
   // TODO(circle360): replace before going live.
-  static const legalEntity = '[LEGAL ENTITY NAME]';
-  static const address = '[REGISTERED ADDRESS]';
-  static const supportEmail = '[SUPPORT EMAIL]';
-  static const supportPhone = '[SUPPORT PHONE]';
-  static const siteDomain = '[DOMAIN]';
+  static const legalEntity = 'Spacewire Tech';
+  static const address = '15th Cross Rd, 6Th Sector, HSR Layout, Bengaluru, Karnataka 560102';
+  static const supportEmail = 'contact@circle360.com';
+  static const supportPhone = '+91 XXXXX XXXXX';
+  static const siteDomain = 'spacewiretech.com';
 
   /// Set either to a real listing URL and every download button on the site goes live —
   /// no other edit. Null renders the "coming soon" state instead.

@@ -1,9 +1,12 @@
 import 'dart:async';
 
+import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:go_router/go_router.dart';
 
+import 'package:loc_360/app/router.dart';
 import 'package:loc_360/data/cashfree/cashfree_checkout.dart';
 import 'package:loc_360/data/cashfree/upi_app_preference.dart';
 import 'package:loc_360/data/models/app_user.dart';
@@ -13,6 +16,7 @@ import 'package:loc_360/data/providers.dart';
 import 'package:loc_360/data/repositories/auth_repository.dart';
 import 'package:loc_360/data/repositories/subscription_repository.dart';
 import 'package:loc_360/features/payment_status/payment_outcome.dart';
+import 'package:loc_360/features/payment_status/payment_status_view.dart';
 import 'package:loc_360/features/splash/splash_viewmodel.dart';
 import 'package:loc_360/features/subscription/subscription_viewmodel.dart';
 
@@ -445,6 +449,112 @@ void main() {
       expect(checkout.openCount + checkout.openWithAppCount, 1);
     });
   });
+
+  group('PaymentStatusView', () {
+    // The screen the paywall hands every outcome to. It is the last thing a user sees on a
+    // failed payment, so it has to render — a screen that throws while building leaves them
+    // staring at a red box with no way back to the paywall.
+    late _FakeSubscriptionRepository repository;
+
+    /// The real routes it navigates to, plus stubs for the two it can leave for.
+    GoRouter routerFor(PaymentOutcome outcome) => GoRouter(
+          initialLocation: Routes.paymentStatusFor(outcome),
+          routes: [
+            GoRoute(
+              path: Routes.paymentStatus,
+              builder: (context, state) => PaymentStatusView(
+                outcome: PaymentOutcome.parse(state.pathParameters['outcome']),
+              ),
+            ),
+            GoRoute(
+              path: Routes.location,
+              builder: (_, _) => const Scaffold(body: Text('location')),
+            ),
+            GoRoute(
+              path: Routes.subscribe,
+              builder: (_, _) => const Scaffold(body: Text('paywall')),
+            ),
+          ],
+        );
+
+    ProviderContainer containerWith({String? error}) => ProviderContainer(overrides: [
+          subscriptionRepositoryProvider.overrideWithValue(repository),
+          // Long enough that the pending screen's backoff never fires inside a test: what is
+          // under test here is the frame, and the polling has its own coverage.
+          subscriptionPollDelaysProvider.overrideWithValue(const [Duration(minutes: 30)]),
+          subscriptionViewModelProvider.overrideWith(() => _StubSubscription(error)),
+        ]);
+
+    Future<void> pumpStatus(
+      WidgetTester tester,
+      ProviderContainer container,
+      PaymentOutcome outcome,
+    ) async {
+      await tester.binding.setSurfaceSize(const Size(390, 844));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      await tester.pumpWidget(UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp.router(routerConfig: routerFor(outcome)),
+      ));
+      await tester.pump();
+    }
+
+    /// Unmount first so the success dwell timer and the pending backoff are cancelled by the
+    /// widgets that own them, rather than left pending when the test ends.
+    Future<void> teardown(WidgetTester tester, ProviderContainer container) async {
+      await tester.pumpWidget(const SizedBox());
+      container.dispose();
+    }
+
+    setUp(() => repository = _FakeSubscriptionRepository());
+
+    for (final outcome in PaymentOutcome.values) {
+      testWidgets('${outcome.slug} builds', (tester) async {
+        // Regression: failed asks for no trailing spacer, which reached Spacer as flex: 0 and
+        // tripped its assertion — so the one outcome that most needed to be readable was the
+        // one that could not be drawn.
+        final container = containerWith();
+        await pumpStatus(tester, container, outcome);
+
+        expect(tester.takeException(), isNull);
+        expect(find.byType(PaymentStatusView), findsOneWidget);
+        await teardown(tester, container);
+      });
+    }
+
+    testWidgets('failed names the reason the payment was refused', (tester) async {
+      final container = containerWith(error: 'Too many attempts. Please try again later.');
+      await pumpStatus(tester, container, PaymentOutcome.failed);
+
+      expect(find.text('Too many attempts. Please try again later.'), findsOneWidget);
+      expect(
+        find.text('Insufficient funds'),
+        findsNothing,
+        reason: 'a guess alongside the real answer is just noise',
+      );
+      await teardown(tester, container);
+    });
+
+    testWidgets('failed falls back to the usual causes when nothing was recorded',
+        (tester) async {
+      final container = containerWith();
+      await pumpStatus(tester, container, PaymentOutcome.failed);
+
+      expect(find.text('Insufficient funds'), findsOneWidget);
+      await teardown(tester, container);
+    });
+  });
+}
+
+/// The paywall's notifier with its load skipped, so a widget test can put it in the state that
+/// matters — here, what it recorded about the failure — without touching a repository.
+class _StubSubscription extends SubscriptionViewModel {
+  _StubSubscription(this.error);
+
+  final String? error;
+
+  @override
+  SubscriptionState build() => SubscriptionState(loading: false, error: error);
 }
 
 class _FakeSubscriptionRepository implements SubscriptionRepository {

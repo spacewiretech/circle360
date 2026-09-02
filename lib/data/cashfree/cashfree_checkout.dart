@@ -116,6 +116,12 @@ class SdkCashfreeCheckout implements CashfreeCheckout {
   }
 
   void _onError(CFErrorResponse error, String _) {
+    // Logged in full because the message alone rarely identifies the refusal. A mandate whose
+    // session has already been spent, a subscription Cashfree considers un-payable and a
+    // genuine user cancellation all surface as an unremarkable sentence; the code and type are
+    // what tell them apart, and only this callback ever sees them.
+    debugPrint('[cashfree] payment failed: status=${error.getStatus()} '
+        'code=${error.getCode()} type=${error.getType()} message=${error.getMessage()}');
     _complete(CheckoutResult(CheckoutOutcome.failed, error.getMessage()));
   }
 
@@ -185,6 +191,12 @@ class SdkCashfreeCheckout implements CashfreeCheckout {
     required String upiAppId,
   }) {
     return _run(() {
+      // The intent is not dispatched here: the SDK first asks Cashfree to authorise the mandate
+      // and only launches the UPI app once that call comes back with a URI. So a failure logged
+      // straight after this line is Cashfree refusing the *subscription*, not the phone
+      // refusing the app — which is the difference between "retry" and "mint a new mandate".
+      debugPrint('[cashfree] opening $upiAppId for $subscriptionId ($environment)');
+
       // `setUPIID` is named for the collect flow, but under INTENT the SDK reads it as the id
       // of the app to launch — the package name on Android, the URL scheme on iOS. It is
       // passed through exactly as `getUPIApps` gave it to us.

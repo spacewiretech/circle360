@@ -53,7 +53,7 @@ class _InviteViewState extends ConsumerState<InviteView> {
 
     return OnboardingScaffold(
       hero: Image.asset(
-        Img.inviteHero,
+        Img.inviteHeroWeb,
         width: heroWidth,
         // Height follows the asset's own aspect; the sheet crops whatever hangs below.
         fit: BoxFit.fitWidth,

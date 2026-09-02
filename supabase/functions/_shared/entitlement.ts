@@ -127,5 +127,9 @@ export function entitlementPayload(
     current_period_end: user.current_period_end,
     entitled: isEntitled(user, graceHours, now),
     in_trial: isInTrial(user, graceHours, now),
+    // Not an entitlement signal — the user is still fully in — but the app needs it to warn
+    // them while there is still time to fix the mandate. Without it, an on-hold subscription is
+    // invisible until the day access disappears.
+    billing_state: user.billing_state ?? null,
   };
 }
