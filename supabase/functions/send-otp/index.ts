@@ -2,6 +2,7 @@ import { fail, json, preflight } from "../_shared/cors.ts";
 import { consumeOtpQuota, isValidMobile, serviceClient } from "../_shared/db.ts";
 import { loadConfig } from "../_shared/config.ts";
 import { devOtpEnabled, warnDevOtp } from "../_shared/dev_otp.ts";
+import { isReviewMobile, warnReviewAccount } from "../_shared/review_account.ts";
 import { credentialsFrom, Fast2SmsError, sendOtp } from "../_shared/fast2sms.ts";
 
 Deno.serve(async (req) => {
@@ -21,6 +22,14 @@ Deno.serve(async (req) => {
 
   const db = serviceClient();
   const config = await loadConfig(db);
+
+  // Checked before the dev bypass so the review number always answers to its own code, whether
+  // or not dev mode happens to be on. The response is byte-for-byte a normal success: probing
+  // numbers must not reveal which one is the review account.
+  if (isReviewMobile(config, mobile)) {
+    warnReviewAccount("send-otp");
+    return json({ ok: true });
+  }
 
   if (devOtpEnabled(config)) {
     warnDevOtp("send-otp");

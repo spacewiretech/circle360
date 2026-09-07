@@ -2,6 +2,7 @@ import { fail, json, preflight } from "../_shared/cors.ts";
 import { consumeOtpQuota, isValidMobile, serviceClient } from "../_shared/db.ts";
 import { loadConfig } from "../_shared/config.ts";
 import { devOtpEnabled, warnDevOtp } from "../_shared/dev_otp.ts";
+import { isReviewMobile, warnReviewAccount } from "../_shared/review_account.ts";
 import {
   credentialsFrom,
   Fast2SmsError,
@@ -26,6 +27,13 @@ Deno.serve(async (req) => {
 
   const db = serviceClient();
   const config = await loadConfig(db);
+
+  // Nothing was sent the first time, so there is nothing to redeliver — but the reviewer may
+  // well tap Resend, and it has to look like it worked.
+  if (isReviewMobile(config, mobile)) {
+    warnReviewAccount("resend-otp");
+    return json({ ok: true });
+  }
 
   if (devOtpEnabled(config)) {
     warnDevOtp("resend-otp");

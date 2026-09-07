@@ -14,6 +14,11 @@ import {
 } from "../_shared/entitlement.ts";
 import { DEV_OTP, devOtpEnabled, warnDevOtp } from "../_shared/dev_otp.ts";
 import {
+  consumeReviewVerifyQuota,
+  reviewAccount,
+  warnReviewAccount,
+} from "../_shared/review_account.ts";
+import {
   credentialsFrom,
   Fast2SmsError,
   VerifyResult,
@@ -46,8 +51,23 @@ Deno.serve(async (req) => {
   const db = serviceClient();
   const config = await loadConfig(db);
 
+  const review = reviewAccount(config);
+
   let result: VerifyResult;
-  if (devOtpEnabled(config)) {
+  if (review && review.mobile === mobile) {
+    warnReviewAccount("verify-otp");
+    // The code is fixed and never rotates, so this is the only thing standing between a
+    // guessed number and the account. Throttled before the comparison, so a wrong guess costs
+    // an attempt whether or not it was close.
+    if (!await consumeReviewVerifyQuota(db, mobile)) {
+      return fail(
+        "throttled",
+        "Too many attempts for this number. Please try again later.",
+        429,
+      );
+    }
+    result = otp === review.otp ? "verified" : "wrong_code";
+  } else if (devOtpEnabled(config)) {
     warnDevOtp("verify-otp");
     // Only the SMS check is stubbed. Everything below is the real path — a real users row
     // and a real session token — so the rest of the stack is genuinely exercised.
