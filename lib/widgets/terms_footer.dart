@@ -3,6 +3,8 @@ import 'package:flutter/gestures.dart';
 
 import '../app/theme/app_colors.dart';
 import '../app/theme/app_typography.dart';
+import '../data/analytics/analytics.dart';
+import '../data/analytics/analytics_events.dart';
 
 /// "By continuing you agree to our Terms of Service and Privacy Policy".
 ///
@@ -27,9 +29,12 @@ class _TermsFooterState extends State<TermsFooter> {
     super.dispose();
   }
 
-  TapGestureRecognizer _tap(String what) {
+  TapGestureRecognizer _tap(String what, String event) {
     final recognizer = TapGestureRecognizer()
       ..onTap = () {
+        // Tracked even though the links go nowhere yet: how many people reach for the terms on
+        // the paywall is the argument for wiring them up, and it can only be made with numbers.
+        analytics.track(event, {P.label: what});
         if (!mounted) return;
         ScaffoldMessenger.of(context)
           ..hideCurrentSnackBar()
@@ -55,13 +60,13 @@ class _TermsFooterState extends State<TermsFooter> {
           TextSpan(
             text: 'Terms of Service',
             style: link,
-            recognizer: _tap('Terms of Service'),
+            recognizer: _tap('Terms of Service', Ev.termsTapped),
           ),
           TextSpan(text: widget.compact ? ' | ' : ' and '),
           TextSpan(
             text: 'Privacy Policy',
             style: link,
-            recognizer: _tap('Privacy Policy'),
+            recognizer: _tap('Privacy Policy', Ev.privacyTapped),
           ),
         ],
       ),

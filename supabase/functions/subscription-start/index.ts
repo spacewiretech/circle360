@@ -16,7 +16,12 @@ import {
   isEntitled,
   USER_COLUMNS,
 } from "../_shared/entitlement.ts";
-import { isResumable, latestSubscription } from "../_shared/subscription_sync.ts";
+import { configureMixpanel } from "../_shared/mixpanel.ts";
+import {
+  isResumable,
+  latestSubscription,
+  trackCancellation,
+} from "../_shared/subscription_sync.ts";
 
 /**
  * Opens a Cashfree UPI Autopay mandate: ₹3 now, then ₹499/month starting after the trial.
@@ -51,6 +56,9 @@ Deno.serve(async (req) => {
   if (!userId) return fail("unauthorized", "Please sign in again.", 401);
 
   const config = await loadConfig(db);
+  // The stale-mandate cleanup below cancels a real UPI mandate; without the token that event is
+  // dropped silently, so this entry point needs the same setup as the other four.
+  configureMixpanel(config, "subscription-start");
   const graceHours = graceHoursFrom(config);
 
   let settings;
@@ -142,6 +150,18 @@ Deno.serve(async (req) => {
         failure_reason: "replaced by a new mandate",
       })
       .eq("id", existing.id);
+
+    // Counted as a cancellation because that is what it is at the bank, but attributed to the
+    // system: the user is in the middle of starting a *new* mandate, and a churn report that
+    // reads this as them leaving would be exactly wrong.
+    await trackCancellation({
+      userId,
+      subscriptionId: existing.subscription_id,
+      cancelledBy: "system",
+      cfStatus: "CANCELLED",
+      fromStatus: existing.status,
+      reason: "replaced_by_new_mandate",
+    });
   }
 
   const now = new Date();

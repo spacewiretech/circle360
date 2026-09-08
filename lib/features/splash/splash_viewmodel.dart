@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../data/analytics/analytics_events.dart';
 import '../../data/entitlement.dart';
 import '../../data/models/app_user.dart';
 import '../../data/pending_invite.dart';
@@ -62,18 +63,51 @@ Future<SplashDestination> destinationForUser({
 }
 
 final splashDestinationProvider = FutureProvider.autoDispose<SplashDestination>((ref) async {
+  final started = DateTime.now();
+  final analytics = ref.read(analyticsProvider);
+
   // The cold-start link has to resolve before the branch, or the splash would fall through to
   // the phone screen while the invite was still arriving.
   await ref.watch(deeplinkListenerProvider.future);
-  if (ref.watch(pendingInviteProvider) != null) return SplashDestination.invite;
+
+  final invite = ref.watch(pendingInviteProvider);
+  if (invite != null) {
+    // Acquisition attribution: the inviter's name and the code are the only evidence the app
+    // ever gets that a user arrived through someone else rather than on their own.
+    analytics.track(Ev.deepLinkOpened, {
+      P.linkType: 'invite',
+      P.code: invite.code,
+      P.inviterName: invite.inviterName,
+      P.coldStart: true,
+    });
+    analytics.track(Ev.splashResolved, {
+      P.destination: SplashDestination.invite.name,
+      P.ms: DateTime.now().difference(started).inMilliseconds,
+    });
+    return SplashDestination.invite;
+  }
 
   final user = await ref.watch(authRepositoryProvider).currentUser();
   // Cached-user fallbacks are re-derived from their stored dates by SessionStore, so an offline
   // launch cannot walk in on an entitlement that expired while the device had no signal.
   ref.read(entitlementProvider.notifier).set(user);
 
-  return destinationForUser(
+  final destination = await destinationForUser(
     user: user,
     locationService: ref.read(locationServiceProvider),
   );
+
+  // Where returning users actually land, and how long they waited to find out. This is the
+  // denominator for every other funnel in the app — a session that resolves to `home` never
+  // enters the onboarding or paywall funnels at all, and counting it in them understates both.
+  analytics.track(Ev.splashResolved, {
+    P.destination: destination.name,
+    P.isSignedIn: user != null,
+    P.entitled: user?.entitled ?? false,
+    P.hasName: user?.hasName ?? false,
+    P.paymentType: user?.paymentType.name,
+    P.ms: DateTime.now().difference(started).inMilliseconds,
+  });
+
+  return destination;
 });

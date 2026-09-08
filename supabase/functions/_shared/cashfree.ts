@@ -395,6 +395,45 @@ export function isLiveStatus(status: string): boolean {
   ].includes(status);
 }
 
+/**
+ * Cashfree names customer-initiated states separately from merchant-initiated ones.
+ *
+ * A user who revokes the UPI mandate in their own PSP app — Mandates > Active Mandates > Cancel —
+ * lands the subscription in `CUSTOMER_CANCELLED`, not `CANCELLED`; pausing it there gives
+ * `CUSTOMER_PAUSED`, not `PAUSED`. Only the merchant-initiated words came out of our own
+ * `subscription-cancel` call, so those were the only ones this backend ever learned, and every
+ * `status === "CANCELLED"` comparison silently fell through for the far more common case: the
+ * user cancelled the mandate rather than asking us to.
+ *
+ * The consequence was not only a missing analytics event. `userUpdatesFor` hit its `default:`
+ * branch, so the account kept `payment_type` and stayed entitled through a subscription the bank
+ * would never debit again.
+ *
+ * These are predicates rather than a normalisation step on purpose: `subscriptions.status` stores
+ * whatever word Cashfree used, which is the record of what the gateway actually said, and
+ * collapsing the pair on the way in would throw away the one bit that says who did it.
+ */
+export function isCancelledStatus(status: string): boolean {
+  return status === "CANCELLED" || status === "CUSTOMER_CANCELLED";
+}
+
+export function isPausedStatus(status: string): boolean {
+  return status === "PAUSED" || status === "CUSTOMER_PAUSED";
+}
+
+/**
+ * Ran its course, or was never authorised in time. `LINK_EXPIRED` is the non-seamless twin of
+ * `EXPIRED` — the authorisation link went unused — and means the same thing to entitlement.
+ */
+export function isExpiredStatus(status: string): boolean {
+  return status === "COMPLETED" || status === "EXPIRED" || status === "LINK_EXPIRED";
+}
+
+/** Who ended it, for the one property every cancellation report breaks down by. */
+export function cancelledBy(status: string): "customer" | "merchant" {
+  return status === "CUSTOMER_CANCELLED" ? "customer" : "merchant";
+}
+
 // ---------------------------------------------------------------- webhooks
 
 const encoder = new TextEncoder();
@@ -460,6 +499,12 @@ export async function dedupeKey(
  * Cashfree nests the subscription id differently per event type — sometimes at `data`,
  * sometimes under `data.subscription_details`, sometimes under a `subscription_status_webhook`
  * wrapper. Rather than a switch per event, walk the few known shapes and take the first hit.
+ *
+ * The camelCase spellings are the legacy Subscriptions API's, kept for the same reason the event
+ * type is read from `type ?? event`: an endpoint configured against the older API version sends
+ * `subscriptionId` where this one sends `subscription_id`, and a delivery whose id is not found
+ * is not an error — it falls through to the `ignored` branch and is acknowledged, so a mandate
+ * would go on being cancelled with nothing here ever noticing.
  */
 export function subscriptionIdsFrom(
   payload: Record<string, unknown>,
@@ -473,15 +518,22 @@ export function subscriptionIdsFrom(
     payload,
   ];
 
+  const OURS = ["subscription_id", "subscriptionId"];
+  const THEIRS = ["cf_subscription_id", "cfSubscriptionId", "subReferenceId"];
+
   let subscriptionId: string | null = null;
   let cfSubscriptionId: string | null = null;
 
   for (const source of candidates) {
-    if (!subscriptionId && typeof source.subscription_id === "string") {
-      subscriptionId = source.subscription_id;
+    for (const key of OURS) {
+      if (!subscriptionId && typeof source[key] === "string") {
+        subscriptionId = source[key] as string;
+      }
     }
-    if (!cfSubscriptionId && source.cf_subscription_id != null) {
-      cfSubscriptionId = String(source.cf_subscription_id);
+    for (const key of THEIRS) {
+      if (!cfSubscriptionId && source[key] != null) {
+        cfSubscriptionId = String(source[key]);
+      }
     }
   }
 

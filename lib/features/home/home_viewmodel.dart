@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../data/analytics/analytics_events.dart';
 import '../../data/dialer.dart';
 import '../../data/location/location_controller.dart';
 import '../../data/models/tracked_person.dart';
@@ -158,13 +159,22 @@ class HomeViewModel extends Notifier<HomeState> {
     state = state.copyWith(
       requests: state.requests.where((p) => p.id != personId).toList(),
     );
+    final analytics = ref.read(analyticsProvider);
     try {
       await _family.respond(personId: personId, accept: accept);
       state = state.copyWith(
         message: accept ? 'You\'re now sharing your location' : 'Request declined',
       );
+      // The moment a one-way follow becomes a mutual connection, which is the closest thing this
+      // app has to a virality metric.
+      analytics.track(accept ? Ev.requestAccepted : Ev.requestDeclined);
     } on EdgeError catch (e) {
       state = state.copyWith(message: e.message);
+      analytics.track(Ev.errorShown, {
+        P.source: accept ? 'accept_request' : 'decline_request',
+        P.code: e.code,
+        P.message: e.message,
+      });
     }
   }
 
@@ -186,6 +196,11 @@ class HomeViewModel extends Notifier<HomeState> {
   }
 
   Future<void> runAction(PersonAction action, TrackedPerson person) async {
+    ref.read(analyticsProvider).track(Ev.personActionTapped, {
+      P.action: action.name,
+      P.state: person.status.name,
+    });
+
     // Calling is done on the device, not through the backend, so it never reaches the
     // repository's message-returning contract.
     if (action == PersonAction.call) return callPerson(person);

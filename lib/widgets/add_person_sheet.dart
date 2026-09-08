@@ -21,6 +21,9 @@ Future<PersonDraft?> showAddPersonSheet(
     context: context,
     isScrollControlled: true,
     backgroundColor: Colors.transparent,
+    // Named so the navigator observer reports the sheet as its own surface rather than as an
+    // anonymous route over Home or Emergency.
+    routeSettings: const RouteSettings(name: 'add-person'),
     builder: (context) => _AddPersonSheet(title: title, actionLabel: actionLabel),
   );
 }

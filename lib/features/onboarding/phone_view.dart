@@ -64,6 +64,7 @@ class _PhoneViewState extends ConsumerState<PhoneView> {
         onSubmitted: (_) => state.canSendOtp ? _submit() : null,
       ),
       buttonLabel: 'continue',
+      analyticsId: 'phone_continue',
       busy: state.busy,
       error: state.error ?? invalidNumber,
       onContinue: state.canSendOtp ? _submit : null,

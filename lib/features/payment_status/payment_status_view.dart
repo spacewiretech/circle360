@@ -9,6 +9,8 @@ import '../../app/router.dart';
 import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_theme.dart';
 import '../../app/theme/app_typography.dart';
+import '../../data/analytics/analytics.dart';
+import '../../data/analytics/analytics_events.dart';
 import '../../widgets/primary_button.dart';
 import '../subscription/subscription_viewmodel.dart';
 import 'payment_outcome.dart';
@@ -41,6 +43,17 @@ class _PaymentStatusViewState extends ConsumerState<PaymentStatusView>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
 
+    // The outcome is in the route, so the observer already reports the screen — but as one
+    // "Payment Status" view for all three. Which of the three it was is the entire point.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      analytics.track(Ev.paymentStatusViewed, {
+        P.outcome: widget.outcome.slug,
+        P.paymentAttemptId:
+            ref.read(subscriptionViewModelProvider.notifier).attemptId,
+      });
+    });
+
     if (widget.outcome == PaymentOutcome.success) {
       // The frame carries no button, so the screen has to move on by itself.
       _advance = Timer(_successDwell, _toLocation);
@@ -63,7 +76,7 @@ class _PaymentStatusViewState extends ConsumerState<PaymentStatusView>
     // Coming back from the UPI app is the single most likely moment for a pending mandate to
     // have just confirmed, and it is exactly when a timer-only poll is mid-backoff.
     if (state == AppLifecycleState.resumed && widget.outcome == PaymentOutcome.pending) {
-      ref.read(paymentStatusViewModelProvider.notifier).check();
+      ref.read(paymentStatusViewModelProvider.notifier).check(trigger: 'resume');
     }
   }
 
@@ -98,6 +111,15 @@ class _PaymentStatusViewState extends ConsumerState<PaymentStatusView>
       // Back would land on the paywall, which is either wrong (they have paid) or a dead end
       // (the mandate is still settling). Every outcome offers its own way on.
       canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) {
+          analytics.track(Ev.backPressed, {
+            P.screen: 'Payment Status',
+            P.blocked: true,
+            P.outcome: widget.outcome.slug,
+          });
+        }
+      },
       child: Scaffold(
         backgroundColor: outcome.background,
         body: SafeArea(
@@ -121,7 +143,15 @@ class _PaymentStatusViewState extends ConsumerState<PaymentStatusView>
                   const SizedBox(height: 20),
                   PrimaryButton(
                     label: 'Retry Payment',
-                    onPressed: () => context.go(Routes.subscribe),
+                    onPressed: () {
+                      analytics.track(Ev.retryPaymentTapped, {
+                        P.reason: reason,
+                        P.paymentAttemptId: ref
+                            .read(subscriptionViewModelProvider.notifier)
+                            .attemptId,
+                      });
+                      context.go(Routes.subscribe);
+                    },
                   ),
                   const SizedBox(height: 8),
                 ] else if (widget.outcome == PaymentOutcome.pending) ...[
@@ -129,7 +159,9 @@ class _PaymentStatusViewState extends ConsumerState<PaymentStatusView>
                   PrimaryButton(
                     label: 'Check Payment Status',
                     busy: pending.checking,
-                    onPressed: ref.read(paymentStatusViewModelProvider.notifier).check,
+                    onPressed: () => ref
+                        .read(paymentStatusViewModelProvider.notifier)
+                        .check(trigger: 'manual'),
                   ),
                   if (pending.exhausted) ...[
                     const SizedBox(height: 14),

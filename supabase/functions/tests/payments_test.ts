@@ -15,18 +15,28 @@ import {
   CashfreeSettings,
   dedupeKey,
   disputeFrom,
+  isCancelledStatus,
   isDisputeLost,
+  isExpiredStatus,
   isLiveStatus,
+  isPausedStatus,
   paymentFrom,
   refundFrom,
   snapshotOf,
+  SubscriptionSnapshot,
   subscriptionIdsFrom,
   toIstIso,
   verifyWebhook,
   webhookSignature,
 } from "../_shared/cashfree.ts";
 import { isEntitled, isInTrial, UserRow } from "../_shared/entitlement.ts";
-import { isFailedCharge, paymentKind } from "../_shared/subscription_sync.ts";
+import {
+  isFailedCharge,
+  isResumable,
+  paymentKind,
+  transitionName,
+  userUpdatesFor,
+} from "../_shared/subscription_sync.ts";
 
 const NOW = new Date("2026-09-01T12:00:00Z");
 
@@ -406,4 +416,146 @@ Deno.test("a scheduled charge is not a failed one", () => {
   assert(isFailedCharge("FAILED"));
   assert(isFailedCharge("USER_DROPPED"));
   assert(isFailedCharge("cancelled"), "case-insensitive");
+});
+
+// -------------------------------------------- customer-initiated cancellation
+
+/**
+ * The bug these cover, in one sentence: Cashfree spells a mandate the *customer* revoked in
+ * their UPI app `CUSTOMER_CANCELLED`, and every entitlement branch here used to compare against
+ * `CANCELLED` — the word that only ever comes back from a cancel *we* requested. So the far more
+ * common case fell through to the no-op default, and a user who had cancelled went on being
+ * treated as a paying subscriber until their trial ran out.
+ */
+
+function snapshot(overrides: Partial<SubscriptionSnapshot> = {}): SubscriptionSnapshot {
+  return {
+    subscriptionId: "sub_1",
+    cfSubscriptionId: "cf_1",
+    status: "ACTIVE",
+    sessionId: null,
+    authorizationAmount: 3,
+    recurringAmount: 499,
+    firstChargeTime: null,
+    nextScheduleDate: null,
+    authorizedAt: null,
+    raw: {},
+    ...overrides,
+  };
+}
+
+Deno.test("a mandate cancelled from the UPI app revokes the account", () => {
+  const updates = userUpdatesFor(
+    user({ payment_type: "trial" }),
+    snapshot({ status: "CUSTOMER_CANCELLED" }),
+    settings,
+  );
+
+  assertEquals(updates.payment_type, "cancelled");
+  assert(updates.cancelled_at, "cancelled_at must be stamped");
+});
+
+Deno.test("a merchant cancel and a customer cancel are treated the same", () => {
+  const merchant = userUpdatesFor(user(), snapshot({ status: "CANCELLED" }), settings);
+  const customer = userUpdatesFor(user(), snapshot({ status: "CUSTOMER_CANCELLED" }), settings);
+
+  assertEquals(merchant.payment_type, customer.payment_type);
+  assertEquals(merchant.billing_state, customer.billing_state);
+});
+
+Deno.test("cancelling does not claw back time already paid for", () => {
+  // The user keeps the month they bought. Touching current_period_end here would lock out
+  // someone who cancelled the day after being charged.
+  const paidTo = "2026-10-01T00:00:00.000Z";
+  const updates = userUpdatesFor(
+    user({ payment_type: "active", current_period_end: paidTo }),
+    snapshot({ status: "CUSTOMER_CANCELLED" }),
+    settings,
+  );
+
+  assertEquals(updates.current_period_end, undefined);
+  assertEquals(updates.payment_type, "cancelled");
+});
+
+Deno.test("a mandate paused from the UPI app is marked, not revoked", () => {
+  // Pausing is not cancelling: entitlement simply stops advancing. But it has to leave a trace,
+  // or a stalled mandate looks perfectly healthy right up to the lockout.
+  const updates = userUpdatesFor(user(), snapshot({ status: "CUSTOMER_PAUSED" }), settings);
+
+  assertEquals(updates.billing_state, "paused");
+  assertEquals(updates.payment_type, undefined);
+});
+
+Deno.test("an authorisation link that expired unused ends the account", () => {
+  assertEquals(
+    userUpdatesFor(user(), snapshot({ status: "LINK_EXPIRED" }), settings).payment_type,
+    "expired",
+  );
+});
+
+Deno.test("re-authorising after a customer cancellation restores the account", () => {
+  // The recovery path has to work from `cancelled` too, or a user who cancelled and changed
+  // their mind pays again and stays locked out.
+  const updates = userUpdatesFor(
+    user({ payment_type: "cancelled" }),
+    snapshot({ status: "ACTIVE" }),
+    settings,
+  );
+
+  assertEquals(updates.payment_type, "trial");
+});
+
+Deno.test("both spellings of cancelled name the same transition", () => {
+  // Reported as `other` before this, which is why a cancellation could not be found in Mixpanel
+  // even on the deliveries that did arrive.
+  assertEquals(transitionName("ACTIVE", "CUSTOMER_CANCELLED"), "cancelled");
+  assertEquals(transitionName("ACTIVE", "CANCELLED"), "cancelled");
+  assertEquals(transitionName("ACTIVE", "CUSTOMER_PAUSED"), "paused");
+  assertEquals(transitionName("CUSTOMER_PAUSED", "ACTIVE"), "recovered");
+  assertEquals(transitionName("ACTIVE", "LINK_EXPIRED"), "expired");
+});
+
+Deno.test("status predicates cover both spellings and nothing else", () => {
+  assert(isCancelledStatus("CANCELLED"));
+  assert(isCancelledStatus("CUSTOMER_CANCELLED"));
+  assertFalse(isCancelledStatus("ACTIVE"));
+  assertFalse(isCancelledStatus("CUSTOMER_PAUSED"));
+
+  assert(isPausedStatus("PAUSED"));
+  assert(isPausedStatus("CUSTOMER_PAUSED"));
+  assertFalse(isPausedStatus("ON_HOLD"));
+
+  assert(isExpiredStatus("COMPLETED"));
+  assert(isExpiredStatus("LINK_EXPIRED"));
+  assertFalse(isExpiredStatus("CUSTOMER_CANCELLED"));
+});
+
+Deno.test("a customer-paused mandate is not a resumable checkout", () => {
+  // isLiveStatus feeds isResumable, which decides whether the stored session token can be handed
+  // back to the SDK. A mandate the user paused in their UPI app has no live checkout to resume;
+  // widening isLiveStatus to include it would hand the client a dead session id.
+  assertFalse(isResumable({ status: "CUSTOMER_PAUSED", session_expiry: null } as never));
+  assertFalse(isLiveStatus("CUSTOMER_PAUSED"));
+  assertFalse(isLiveStatus("CUSTOMER_CANCELLED"));
+});
+
+Deno.test("a legacy-shaped webhook still names its subscription", () => {
+  // The event type is already read from `type ?? event` for the older API version. The ids were
+  // not, so a delivery in that shape fell into the `ignored` branch and was acknowledged —
+  // a cancellation would have been dropped with a 200.
+  assertEquals(
+    subscriptionIdsFrom({ event: "SUBSCRIPTION_STATUS_CHANGE", subscriptionId: "sub_9" })
+      .subscriptionId,
+    "sub_9",
+  );
+  assertEquals(
+    subscriptionIdsFrom({ data: { subReferenceId: 4242 } }).cfSubscriptionId,
+    "4242",
+  );
+  // The current shape still wins where both are present.
+  assertEquals(
+    subscriptionIdsFrom({ data: { subscription_id: "new", subscriptionId: "old" } })
+      .subscriptionId,
+    "new",
+  );
 });

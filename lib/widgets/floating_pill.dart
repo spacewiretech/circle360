@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../app/assets.dart';
 import '../app/theme/app_colors.dart';
 import '../app/theme/app_typography.dart';
+import '../data/analytics/analytics.dart';
 import 'app_icon.dart';
 
 /// White pill floating over the map — "Emergency Contacts" on Home.
@@ -12,11 +13,13 @@ class FloatingPill extends StatelessWidget {
     required this.label,
     required this.trailing,
     this.onTap,
+    this.analyticsId,
   });
 
   final String label;
   final Widget trailing;
   final VoidCallback? onTap;
+  final String? analyticsId;
 
   @override
   Widget build(BuildContext context) {
@@ -27,7 +30,7 @@ class FloatingPill extends StatelessWidget {
       elevation: 4,
       shadowColor: const Color(0x33000000),
       child: InkWell(
-        onTap: onTap,
+        onTap: trackedTap(onTap, id: analyticsId, label: label),
         child: Container(
           height: 44,
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
@@ -65,7 +68,9 @@ class CircleBackButton extends StatelessWidget {
       ),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
-        onTap: onTap,
+        // Named rather than derived: this is the app's back affordance, and it is the one control
+        // whose tap rate is only meaningful when every screen reports it under the same id.
+        onTap: trackedTap(onTap, id: 'back_button'),
         child: const SizedBox(
           width: 40,
           height: 40,

@@ -6,6 +6,8 @@ import 'package:latlong2/latlong.dart';
 
 import '../../app/env.dart';
 import '../../location_service.dart';
+import '../analytics/analytics.dart';
+import '../analytics/analytics_events.dart';
 import '../providers.dart';
 
 /// What the UI needs to know about this device's own tracking.
@@ -160,17 +162,38 @@ class LocationController extends Notifier<LocationState> {
   /// moment foreground location lands, so this mostly exists to refresh state afterwards.
   Future<void> requestPermission() async {
     state = state.copyWith(busy: true, clearError: true);
+    final before = state.permission;
+    analytics.track(Ev.locationPermissionRequested, {
+      P.previousPermission: before.name,
+      P.trigger: 'foreground',
+    });
     try {
       final status = await _service.requestPermissions();
       state = state.copyWith(status: status);
+      // The answer to the OS dialog, which is the only step of this funnel the app does not
+      // control and the one most likely to end the journey. Reported with what it was before so
+      // a re-prompt that changed nothing is distinguishable from a genuine grant.
+      analytics.track(Ev.locationPermissionResult, {
+        P.result: status.permission.name,
+        P.previousPermission: before.name,
+        P.trigger: 'foreground',
+      });
       if (status.permission.canTrack) {
         await syncSession();
         await _service.startTracking();
+        analytics.track(Ev.locationTrackingStarted, {
+          P.permission: status.permission.name,
+          P.trigger: 'permission_granted',
+        });
       }
       await refresh();
     } on Object catch (error) {
       state = state.copyWith(error: 'Could not turn on location. Please try again.');
       debugPrint('[location] requestPermissions failed: $error');
+      analytics.track(Ev.locationTrackingFailed, {
+        P.error: error.toString(),
+        P.trigger: 'request_permission',
+      });
     } finally {
       state = state.copyWith(busy: false);
     }
@@ -180,6 +203,11 @@ class LocationController extends Notifier<LocationState> {
   /// where a runtime prompt would be silently denied.
   Future<void> requestBackgroundPermission() async {
     state = state.copyWith(busy: true, clearError: true);
+    final before = state.permission;
+    analytics.track(Ev.locationPermissionRequested, {
+      P.previousPermission: before.name,
+      P.trigger: 'background',
+    });
     try {
       state = state.copyWith(status: await _service.requestBackgroundPermission());
       // On Android 11+ the call above only *opens* Settings and answers with the status as it
@@ -187,8 +215,19 @@ class LocationController extends Notifier<LocationState> {
       // screen's resume handler covers the case where they take their time in Settings; this
       // covers the runtime-prompt path, where the answer is in by the time we get here.
       await refresh();
+      // Read after the refresh, not from the call's own answer: on Android 11+ that answer is
+      // the pre-Settings status and would report every upgrade as a refusal.
+      analytics.track(Ev.locationPermissionResult, {
+        P.result: state.permission.name,
+        P.previousPermission: before.name,
+        P.trigger: 'background',
+      });
     } on Object catch (error) {
       debugPrint('[location] requestBackgroundPermission failed: $error');
+      analytics.track(Ev.locationTrackingFailed, {
+        P.error: error.toString(),
+        P.trigger: 'request_background_permission',
+      });
     } finally {
       state = state.copyWith(busy: false);
     }
@@ -204,6 +243,10 @@ class LocationController extends Notifier<LocationState> {
       await syncSession();
       await _service.startTracking();
       await refresh();
+      analytics.track(Ev.locationTrackingStarted, {
+        P.permission: state.permission.name,
+        P.trigger: 'resumed_sharing',
+      });
     } finally {
       state = state.copyWith(busy: false);
     }
@@ -217,8 +260,17 @@ class LocationController extends Notifier<LocationState> {
       await _service.stopTracking();
       if (clearCredential) await _service.clearUpload();
       await refresh();
+      analytics.track(Ev.locationTrackingStopped, {
+        // Sign-out is the only caller that clears the credential, so this separates a user who
+        // paused sharing from one who left entirely.
+        P.reason: clearCredential ? 'sign_out' : 'paused',
+      });
     } on Object catch (error) {
       debugPrint('[location] stopTracking failed: $error');
+      analytics.track(Ev.locationTrackingFailed, {
+        P.error: error.toString(),
+        P.trigger: 'stop_tracking',
+      });
     } finally {
       state = state.copyWith(busy: false);
     }
@@ -229,8 +281,13 @@ class LocationController extends Notifier<LocationState> {
   /// The refresh matters for callers with no lifecycle observer of their own — without it the
   /// permission a user just granted in Settings is invisible until something else asks.
   Future<void> openAppSettings() async {
+    analytics.track(Ev.locationSettingsOpened, {P.permission: state.permission.name});
     await _service.openAppSettings();
     await refresh();
+    analytics.track(Ev.locationPermissionResult, {
+      P.result: state.permission.name,
+      P.trigger: 'app_settings',
+    });
   }
 
   Future<void> requestIgnoreBatteryOptimizations() =>

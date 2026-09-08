@@ -15,6 +15,8 @@ import '../../widgets/map_background.dart';
 import '../../widgets/person_card.dart';
 import '../../widgets/primary_button.dart';
 import '../../widgets/sheet_surface.dart';
+import '../../data/analytics/analytics_events.dart';
+import '../../data/providers.dart';
 import 'emergency_viewmodel.dart';
 
 /// Figma `12330:11580` (empty) and `12330:11606` (list).
@@ -22,12 +24,18 @@ class EmergencyView extends ConsumerWidget {
   const EmergencyView({super.key});
 
   Future<void> _add(BuildContext context, WidgetRef ref) async {
+    final analytics = ref.read(analyticsProvider);
+    analytics.track(Ev.addPersonSheetOpened, {P.source: 'emergency'});
+
     final draft = await showAddPersonSheet(
       context,
       title: 'Add Emergency Contact',
       actionLabel: 'Add Contact',
     );
-    if (draft == null) return;
+    if (draft == null) {
+      analytics.track(Ev.addPersonSheetDismissed, {P.source: 'emergency'});
+      return;
+    }
     await ref
         .read(emergencyViewModelProvider.notifier)
         .add(name: draft.name, phone: draft.phone);

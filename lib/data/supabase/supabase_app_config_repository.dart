@@ -53,6 +53,27 @@ class SupabaseAppConfigRepository implements AppConfigRepository {
     }
   }
 
+  /// The cached config, without needing a client or a network call.
+  ///
+  /// Exists for one caller: the boot sequence needs `mixpanel_token` *before* `runApp`, and the
+  /// normal [load] path cannot give it to them — it wants a [SupabaseClient], and on a cold cache
+  /// it blocks for up to [_timeout] on the network, which the first frame may not wait for.
+  /// Reading the same cache directly turns Mixpanel's startup into a disk read on every launch
+  /// but the very first, which is the difference between buffering the launch events and not.
+  ///
+  /// Returns null when there is nothing cached; the caller falls back to the fetched config once
+  /// [load] completes normally.
+  static Future<Map<String, String>?> readCachedConfig() async {
+    try {
+      return SupabaseAppConfigRepository._readCacheFrom(
+        await SharedPreferences.getInstance(),
+      );
+    } catch (error) {
+      debugPrint('app_config cache unreadable: $error');
+      return null;
+    }
+  }
+
   bool _isFresh(SharedPreferences prefs) {
     final at = prefs.getInt(_cacheAtKey);
     if (at == null) return false;
@@ -61,7 +82,9 @@ class SupabaseAppConfigRepository implements AppConfigRepository {
     return age < ttl;
   }
 
-  Map<String, String>? _readCache(SharedPreferences prefs) {
+  Map<String, String>? _readCache(SharedPreferences prefs) => _readCacheFrom(prefs);
+
+  static Map<String, String>? _readCacheFrom(SharedPreferences prefs) {
     final raw = prefs.getString(_cacheKey);
     if (raw == null) return null;
     try {

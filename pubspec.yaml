@@ -16,7 +16,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 1.0.1+2
+version: 1.0.1+4
 
 environment:
   sdk: ^3.12.2
@@ -56,6 +56,15 @@ dependencies:
   # Cashfree UPI Autopay checkout. Only ever handed a session id minted by an Edge Function —
   # no Cashfree credential reaches the device.
   flutter_cashfree_pg_sdk: ^2.4.0
+  # Product analytics. The project token is deliberately not compiled in — it comes from the
+  # `app_config` table at runtime, so tracking can be turned off server-side without a release,
+  # and a checkout with no token simply runs on the no-op implementation.
+  mixpanel_flutter: ^2.13.0
+  # Version and build number in Dart. Mixpanel's native SDKs already attach their own
+  # `$app_version_string`, so this is not for reporting the version — it is so the app can
+  # compare the running version against the last one it saw and tell a fresh install from an
+  # upgrade, which nothing else can answer.
+  package_info_plus: ^10.2.1
   # Invites go out through the phone's own SMS app rather than a bulk SMS route: the Fast2SMS
   # account is a DLT-registered OTP template, and invite text is not OTP traffic.
   # ^13 rather than ^12: the older line pins win32 ^5, which collides with the one

@@ -3,12 +3,22 @@ import '../models/subscription_offer.dart';
 
 /// Raised when the payment backend refuses. [message] is already safe to show.
 class SubscriptionException implements Exception {
-  const SubscriptionException(this.message);
+  const SubscriptionException(this.message, {this.code});
 
   final String message;
 
+  /// The backend's own reason — `throttled`, `payment_failed`, `invalid_request`,
+  /// `unauthorized` — kept alongside the sentence shown to the user.
+  ///
+  /// The message is written for a person and is deliberately vague about which of several very
+  /// different refusals happened; "too many attempts" and "the mandate could not be created" need
+  /// opposite responses from us, and only this tells them apart once they are aggregated. Never
+  /// shown on screen.
+  final String? code;
+
   @override
-  String toString() => 'SubscriptionException: $message';
+  String toString() =>
+      'SubscriptionException(${code ?? 'unknown'}): $message';
 }
 
 abstract interface class SubscriptionRepository {

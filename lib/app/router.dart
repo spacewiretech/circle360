@@ -15,6 +15,7 @@ import '../features/settings/settings_view.dart';
 import '../features/splash/splash_view.dart';
 import '../features/splash/splash_viewmodel.dart';
 import '../features/subscription/subscription_view.dart';
+import 'analytics_observer.dart';
 import 'entitlement_gate.dart';
 
 abstract final class Routes {
@@ -55,6 +56,10 @@ extension SplashDestinationRoute on SplashDestination {
 /// decides where it goes next, so there is no global redirect to keep in sync.
 final appRouter = GoRouter(
   initialLocation: Routes.splash,
+  // One observer instruments every screen, every modal and every back gesture in the app. Doing
+  // it here rather than per-screen means a route added later is tracked the moment it is
+  // routable, with nothing to remember.
+  observers: [analyticsObserver],
   routes: [
     GoRoute(path: Routes.splash, builder: (context, state) => const SplashView()),
     GoRoute(path: Routes.invite, builder: (context, state) => const InviteView()),

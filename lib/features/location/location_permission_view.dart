@@ -8,6 +8,8 @@ import '../../app/router.dart';
 import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_theme.dart';
 import '../../app/theme/app_typography.dart';
+import '../../data/analytics/analytics.dart';
+import '../../data/analytics/analytics_events.dart';
 import '../../data/location/location_controller.dart';
 import '../../location_service.dart';
 import '../onboarding/widgets/onboarding_scaffold.dart';
@@ -182,7 +184,14 @@ class _Rationale extends ConsumerWidget {
           Align(
             alignment: Alignment.centerLeft,
             child: TextButton(
-              onPressed: () => context.go(Routes.home),
+              onPressed: () {
+                // The one way past this screen without granting anything. How many people take
+                // it is the measure of whether the rationale copy above is doing its job.
+                analytics.track(Ev.locationPermissionSkipped, {
+                  P.permission: permission.name,
+                });
+                context.go(Routes.home);
+              },
               style: TextButton.styleFrom(padding: EdgeInsets.zero),
               child: Text(
                 'Not now',
