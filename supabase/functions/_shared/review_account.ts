@@ -41,7 +41,7 @@ export function isReviewMobile(config: AppConfig, mobile: string): boolean {
 }
 
 /**
- * Verify attempts allowed per hour against the review code.
+ * Wrong guesses allowed per hour against the review code.
  *
  * A fixed six-digit code that never rotates is brute-forceable given unlimited guesses, and
  * unlike a real OTP there is no Fast2SMS in front of it doing its own counting. Ten an hour
@@ -51,18 +51,28 @@ export function isReviewMobile(config: AppConfig, mobile: string): boolean {
 const maxVerifyAttempts = 10;
 
 /**
- * Claims one verify attempt for the review number.
+ * Decides whether this verify attempt may proceed, and charges it if it was a wrong guess.
  *
- * Reuses `consume_otp_quota` under a namespaced key: the throttle table is keyed by plain text
- * and the review number spends no send quota, so a prefix keeps verify counting separate from
- * the send budget of a real number that happens to be the same digits.
+ * [correct] is passed in rather than checked here because the budget is spent on failures only.
+ * Charging every attempt — which is what claiming the quota before the comparison amounted to —
+ * meant ten *successful* sign-ins in an hour locked the reviewer out of their own account, the
+ * throttle firing on precisely the traffic it exists to allow. The cap still applies before
+ * [correct] is consulted, so past the limit every attempt is refused whichever code it carried:
+ * an attacker gets [maxVerifyAttempts] guesses an hour and no more, and knowing the code is
+ * what costs nothing.
+ *
+ * Keyed under a `review-verify:` prefix: the throttle table is keyed by plain text and the
+ * review number spends no send quota, so the prefix keeps verify counting separate from the
+ * send budget of a real number that happens to be the same digits.
  */
 export async function consumeReviewVerifyQuota(
   db: SupabaseClient,
   mobile: string,
+  correct: boolean,
 ): Promise<boolean> {
-  const { data, error } = await db.rpc("consume_otp_quota", {
+  const { data, error } = await db.rpc("consume_review_verify_quota", {
     p_mobile: `review-verify:${mobile}`,
+    p_correct: correct,
     p_max: maxVerifyAttempts,
   });
   if (error) {

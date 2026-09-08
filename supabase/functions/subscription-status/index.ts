@@ -1,6 +1,11 @@
-import { cashfreeSettings } from "../_shared/cashfree.ts";
+import {
+  cashfreeSettings,
+  isCancelledStatus,
+  isExpiredStatus,
+} from "../_shared/cashfree.ts";
 import { loadConfig } from "../_shared/config.ts";
 import { fail, json, preflight } from "../_shared/cors.ts";
+import { configureMixpanel } from "../_shared/mixpanel.ts";
 import { serviceClient, userIdForBearer } from "../_shared/db.ts";
 import {
   asUserRow,
@@ -22,7 +27,17 @@ import { latestSubscription, syncSubscription } from "../_shared/subscription_sy
  * paid up must not be locked out because the gateway is briefly unreachable.
  */
 
-const TERMINAL = ["CANCELLED", "COMPLETED", "EXPIRED", "ABANDONED", "FAILED_TO_CREATE"];
+/**
+ * Local-only end states. Cashfree's own are recognised by predicate instead, so the
+ * customer-initiated spellings — `CUSTOMER_CANCELLED` for a mandate revoked in the UPI app —
+ * cannot be missed by a list that only ever learned the merchant-initiated words.
+ */
+const LOCAL_TERMINAL = ["ABANDONED", "FAILED_TO_CREATE"];
+
+function isTerminal(status: string): boolean {
+  return isCancelledStatus(status) || isExpiredStatus(status) ||
+    LOCAL_TERMINAL.includes(status);
+}
 
 Deno.serve(async (req) => {
   const cors = preflight(req);
@@ -33,11 +48,14 @@ Deno.serve(async (req) => {
   if (!userId) return fail("unauthorized", "Please sign in again.", 401);
 
   const config = await loadConfig(db);
+  // The sync path below emits subscription events; without the token they are dropped
+  // silently, so every entry point that can reach it has to set it up.
+  configureMixpanel(config, "subscription-status");
   const graceHours = graceHoursFrom(config);
 
   const subscription = await latestSubscription(db, userId);
 
-  if (subscription && !TERMINAL.includes(subscription.status)) {
+  if (subscription && !isTerminal(subscription.status)) {
     // Pull the payments list only when a debit could be unaccounted for, so the extra Cashfree
     // call stays off the ordinary foreground poll that runs on every app resume.
     //

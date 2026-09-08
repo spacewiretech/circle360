@@ -4,8 +4,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../data/analytics/analytics.dart';
+import '../data/analytics/analytics_events.dart';
 import '../data/entitlement.dart';
+import '../data/models/app_user.dart';
 import '../data/providers.dart';
+import 'analytics_observer.dart';
 import 'router.dart';
 
 /// Wraps the screens behind the paywall and sends the user back to it when access lapses.
@@ -95,10 +99,12 @@ class _EntitlementGateState extends ConsumerState<EntitlementGate>
       // A null user means the session itself is gone, which is a sign-in problem rather than a
       // payment one — send them to the start of onboarding, not to the paywall.
       if (user == null) {
+        _reportEviction(null, 'session_lost');
         context.go(Routes.phone);
         return;
       }
       if (!user.entitled) {
+        _reportEviction(user, 'not_entitled');
         context.go(Routes.subscribe);
         return;
       }
@@ -110,6 +116,22 @@ class _EntitlementGateState extends ConsumerState<EntitlementGate>
     } finally {
       _checking = false;
     }
+  }
+
+  /// Someone was inside the paid app and has just been put back outside it.
+  ///
+  /// Worth its own event rather than being left to look like an ordinary paywall visit: a user
+  /// who was evicted mid-session converts very differently from one arriving at the paywall for
+  /// the first time, and without this they are the same row in every funnel. The screen they were
+  /// thrown out of is the interesting part — a trial expiring while someone is watching the map
+  /// is a different product problem from one expiring on the settings screen.
+  void _reportEviction(AppUser? user, String reason) {
+    analytics.track(Ev.entitlementLapsed, {
+      P.reason: reason,
+      P.screen: analyticsObserver.currentScreen,
+      P.previousPaymentType: user?.paymentType.name,
+      P.billingState: user?.billingState?.name,
+    });
   }
 
   void _armExpiryTimer(DateTime? expiresAt) {
@@ -135,7 +157,10 @@ class _EntitlementGateState extends ConsumerState<EntitlementGate>
     // A payment confirmed on the paywall pushes the new user through this provider, so an
     // entitlement that goes away for any other reason is caught here too.
     ref.listen(entitlementProvider, (_, user) {
-      if (user != null && !user.entitled && mounted) context.go(Routes.subscribe);
+      if (user != null && !user.entitled && mounted) {
+        _reportEviction(user, 'entitlement_changed');
+        context.go(Routes.subscribe);
+      }
     });
 
     return widget.child;

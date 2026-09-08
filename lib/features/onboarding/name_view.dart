@@ -62,6 +62,7 @@ class _NameViewState extends ConsumerState<NameView> {
         onSubmitted: (_) => state.canSaveName ? _submit() : null,
       ),
       buttonLabel: 'continue',
+      analyticsId: 'name_continue',
       busy: state.busy,
       error: state.error,
       onContinue: state.canSaveName ? _submit : null,

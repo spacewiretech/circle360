@@ -13,12 +13,16 @@ import { SupabaseClient } from "jsr:@supabase/supabase-js@2";
 
 import {
   addMonths,
+  cancelledBy,
   cancelSubscription,
   CashfreeSettings,
   fetchSubscription,
   fetchSubscriptionPayments,
+  isCancelledStatus,
   isDisputeLost,
+  isExpiredStatus,
   isLiveStatus,
+  isPausedStatus,
   snapshotOf,
   SubscriptionSnapshot,
   WebhookDispute,
@@ -26,6 +30,7 @@ import {
   WebhookRefund,
 } from "./cashfree.ts";
 import { asUserRow, USER_COLUMNS, UserRow } from "./entitlement.ts";
+import { setProfile, trackServer } from "./mixpanel.ts";
 
 export interface SubscriptionRow {
   id: string;
@@ -68,56 +73,50 @@ function laterOf(a: string | null, b: string | null): string | null {
  * reconcile that runs twice cannot hand out a second trial; `current_period_end` only ever
  * takes the later of the two values, so a redelivered older payment cannot claw back access.
  */
-function userUpdatesFor(
+export function userUpdatesFor(
   user: UserRow,
   snapshot: SubscriptionSnapshot,
   settings: CashfreeSettings,
 ): Record<string, unknown> {
   const updates: Record<string, unknown> = {};
 
-  switch (snapshot.status) {
-    case "ACTIVE": {
-      updates.active_subscription_id = snapshot.subscriptionId;
+  // Written as if/else rather than a switch on the status word, because the states that matter
+  // most here come in customer- and merchant-initiated pairs — `CUSTOMER_CANCELLED` alongside
+  // `CANCELLED` — and a switch is exactly what let one half of each pair fall through to
+  // `default:` and leave a cancelled account fully entitled.
+  if (snapshot.status === "ACTIVE") {
+    updates.active_subscription_id = snapshot.subscriptionId;
 
-      // The trial clock starts at the instant Cashfree captured the ₹3, not at the instant we
-      // heard about it — otherwise a webhook that took an hour to arrive gives an hour of free
-      // trial, and the debit Cashfree scheduled would fire before our own date said it should.
-      if (!user.trial_ends_at && snapshot.authorizedAt) {
-        const endsAt = new Date(
-          new Date(snapshot.authorizedAt).getTime() +
-            settings.trialDays * 24 * 60 * 60 * 1000,
-        );
-        updates.trial_ends_at = endsAt.toISOString();
-      }
-
-      // An account that had lapsed and has now re-authorised goes back to trial-or-active
-      // rather than staying expired. The recurring payment below is what promotes it further.
-      if (user.payment_type === "expired" || user.payment_type === "cancelled") {
-        updates.payment_type = user.current_period_end &&
-            new Date(user.current_period_end).getTime() > Date.now()
-          ? "active"
-          : "trial";
-      }
-      break;
+    // The trial clock starts at the instant Cashfree captured the ₹3, not at the instant we
+    // heard about it — otherwise a webhook that took an hour to arrive gives an hour of free
+    // trial, and the debit Cashfree scheduled would fire before our own date said it should.
+    if (!user.trial_ends_at && snapshot.authorizedAt) {
+      const endsAt = new Date(
+        new Date(snapshot.authorizedAt).getTime() +
+          settings.trialDays * 24 * 60 * 60 * 1000,
+      );
+      updates.trial_ends_at = endsAt.toISOString();
     }
 
-    case "CANCELLED":
-      // Paid time is honoured: current_period_end is deliberately left alone so the user keeps
-      // what they already paid for.
-      updates.payment_type = "cancelled";
-      break;
-
-    case "COMPLETED":
-    case "EXPIRED":
-      updates.payment_type = "expired";
-      break;
-
-    // ON_HOLD, PAUSED, INITIALIZED, PENDING_AUTHORIZATION and anything Cashfree adds later
-    // need no *entitlement* write. The dates simply stop advancing and access lapses on its
-    // own, which is the correct behaviour for every one of them.
-    default:
-      break;
+    // An account that had lapsed and has now re-authorised goes back to trial-or-active
+    // rather than staying expired. The recurring payment below is what promotes it further.
+    if (user.payment_type === "expired" || user.payment_type === "cancelled") {
+      updates.payment_type = user.current_period_end &&
+          new Date(user.current_period_end).getTime() > Date.now()
+        ? "active"
+        : "trial";
+    }
+  } else if (isCancelledStatus(snapshot.status)) {
+    // Paid time is honoured: current_period_end is deliberately left alone so the user keeps
+    // what they already paid for.
+    updates.payment_type = "cancelled";
+  } else if (isExpiredStatus(snapshot.status)) {
+    updates.payment_type = "expired";
   }
+
+  // ON_HOLD, PAUSED, INITIALIZED, PENDING_AUTHORIZATION and anything Cashfree adds later need no
+  // *entitlement* write. The dates simply stop advancing and access lapses on its own, which is
+  // the correct behaviour for every one of them.
 
   // Mandate health, recorded separately from entitlement so it can be acted on before the
   // clock runs out. Previously ON_HOLD and PAUSED left no trace at all: a user whose UPI
@@ -125,7 +124,7 @@ function userUpdatesFor(
   // with nothing anywhere to prompt them to fix it.
   updates.billing_state = snapshot.status === "ON_HOLD"
     ? "on_hold"
-    : snapshot.status === "PAUSED"
+    : isPausedStatus(snapshot.status)
     ? "paused"
     : null;
 
@@ -135,7 +134,7 @@ function userUpdatesFor(
     updates.subscription_started_at = user.subscription_started_at ?? snapshot.authorizedAt;
   }
   updates.next_billing_at = snapshot.nextScheduleDate;
-  if (snapshot.status === "CANCELLED" && !user.cancelled_at) {
+  if (isCancelledStatus(snapshot.status) && !user.cancelled_at) {
     updates.cancelled_at = new Date().toISOString();
   }
 
@@ -157,6 +156,87 @@ function updatesForRecurringSuccess(
 }
 
 // ---------------------------------------------------------------- payments
+
+/**
+ * A name for the transition, so reports do not have to pattern-match pairs of Cashfree strings.
+ *
+ * Only the transitions anyone would act on get a name; everything else is `other`, which is
+ * deliberately still counted — an unnamed transition showing up in volume is how a status
+ * Cashfree added after this was written gets noticed.
+ */
+export function transitionName(from: string, to: string): string {
+  if (to === "ACTIVE" && from !== "ACTIVE") {
+    return from === "ON_HOLD" || isPausedStatus(from) ? "recovered" : "activated";
+  }
+  if (to === "ON_HOLD") return "mandate_on_hold";
+  if (isPausedStatus(to)) return "paused";
+  if (isCancelledStatus(to)) return "cancelled";
+  if (isExpiredStatus(to)) return "expired";
+  return "other";
+}
+
+// ---------------------------------------------------------------- cancellation
+
+/** Who ended the mandate, which is the property every churn report breaks down by. */
+export type CancelInitiator = "customer" | "merchant" | "user_in_app" | "system";
+
+export interface CancellationFacts {
+  userId: string;
+  subscriptionId: string;
+  /**
+   * `customer` is the UPI app; `user_in_app` is our own cancel screen; `merchant` is a cancel we
+   * made on Cashfree's API for some other reason; `system` is housekeeping — a duplicate or
+   * stale mandate the user never knew existed.
+   */
+  cancelledBy: CancelInitiator;
+  /** Cashfree's own word, kept because `CUSTOMER_CANCELLED` and `CANCELLED` mean different things. */
+  cfStatus?: string | null;
+  fromStatus?: string | null;
+  reason?: string | null;
+  wasInTrial?: boolean | null;
+  /** Paid time already bought. A cancellation is not a lapse: access usually runs on past it. */
+  entitledUntil?: string | null;
+  recurringAmount?: number | null;
+  /** For `days_subscribed`, computed here so no report has to do date arithmetic. */
+  startedAt?: string | null;
+}
+
+/**
+ * The event `Subscription Status Changed` was never going to answer on its own.
+ *
+ * Four separate places end a mandate — this module's sync, the duplicate-mandate resolver,
+ * `subscription-start`'s stale-mandate cleanup and the `subscription-cancel` endpoint — and
+ * before this only the first of them emitted anything at all, under a name that said nothing
+ * about churn.
+ *
+ * `$insert_id` is `cancel:<subscription id>` with no time bucket, which is the whole point: a
+ * subscription is cancelled exactly once, so the webhook, the reconcile sweep that replays it an
+ * hour later and the endpoint that requested it all collapse onto one event in Mixpanel. Without
+ * that, the reconcile alone would re-report every cancellation it ever swept.
+ */
+export async function trackCancellation(facts: CancellationFacts): Promise<void> {
+  const started = facts.startedAt ? new Date(facts.startedAt).getTime() : null;
+  const daysSubscribed = started !== null && Number.isFinite(started)
+    ? Math.max(0, Math.floor((Date.now() - started) / 86_400_000))
+    : null;
+
+  await trackServer({
+    event: "Subscription Cancelled",
+    distinctId: facts.userId,
+    insertId: `cancel:${facts.subscriptionId}`,
+    properties: {
+      subscription_id: facts.subscriptionId,
+      cancelled_by: facts.cancelledBy,
+      cf_status: facts.cfStatus ?? null,
+      from_status: facts.fromStatus ?? null,
+      reason: facts.reason ?? null,
+      was_in_trial: facts.wasInTrial ?? null,
+      entitled_until: facts.entitledUntil ?? null,
+      recurring_amount: facts.recurringAmount ?? null,
+      days_subscribed: daysSubscribed,
+    },
+  });
+}
 
 export type PaymentKind = "AUTH" | "RECURRING" | "UNKNOWN";
 
@@ -221,6 +301,38 @@ export async function recordPayment(
 
   if (error) throw new Error(`subscription_payments upsert failed: ${error.message}`);
 
+  // Every charge attempt, successful or not. A failed renewal is the single most actionable
+  // event this system produces — it is the moment a paying customer starts silently churning —
+  // and until now it existed only as a column nobody was watching.
+  const failed = isFailedCharge(payment.status);
+  await trackServer({
+    event: failed
+      ? "Subscription Payment Failed"
+      : payment.status === "SUCCESS"
+      ? (kind === "AUTH" ? "Mandate Authorised" : "Subscription Renewed")
+      : "Subscription Payment Pending",
+    distinctId: subscription.user_id,
+    // Keyed on the charge and its status, not on the delivery: Cashfree redelivers the same
+    // payment webhook freely and the reconcile sweep replays it hourly. Without this one
+    // renewal would be counted every hour, for a month.
+    insertId: `pay:${payment.cfPaymentId}:${payment.status}`,
+    time: payment.paymentTime,
+    properties: {
+      cf_event_type: eventType,
+      cf_payment_id: payment.cfPaymentId,
+      subscription_id: subscription.subscription_id,
+      kind,
+      amount: payment.amount,
+      currency: payment.currency,
+      payment_status: payment.status,
+      failure_reason: payment.failureReason,
+      // True when this charge had already been credited — so a redelivery that changed nothing
+      // is distinguishable from a genuine first-time renewal even before Mixpanel dedupes.
+      already_credited: alreadyCredited,
+      trigger: eventType ?? "reconcile",
+    },
+  });
+
   await db.from("subscriptions").update({
     last_payment_at: payment.paymentTime,
     last_payment_status: payment.status,
@@ -254,10 +366,23 @@ export async function recordPayment(
     (prior?.payment_time as string | null) ??
     (prior?.created_at as string | null);
 
+  const updates = updatesForRecurringSuccess(asUserRow(user), paidAt);
   await db
     .from("users")
-    .update(updatesForRecurringSuccess(asUserRow(user), paidAt))
+    .update(updates)
     .eq("user_id", subscription.user_id);
+
+  // The profile has to move too, or a segment like "active subscribers" is stale until the user
+  // next opens the app — which for a happily-renewing customer might be never.
+  await setProfile(subscription.user_id, {
+    payment_type: updates.payment_type,
+    current_period_end: updates.current_period_end,
+    entitled: true,
+    in_trial: false,
+    has_ever_subscribed: true,
+    last_payment_at: payment.paymentTime,
+    last_payment_status: payment.status,
+  });
 }
 
 /**
@@ -427,7 +552,7 @@ export async function syncSubscription(
     authorized_at: snapshot.authorizedAt ?? row.authorized_at,
     raw: snapshot.raw,
   };
-  if (snapshot.status === "CANCELLED") patch.cancelled_at = new Date().toISOString();
+  if (isCancelledStatus(snapshot.status)) patch.cancelled_at = new Date().toISOString();
 
   const { error: writeError } = await db
     .from("subscriptions")
@@ -458,6 +583,64 @@ export async function syncSubscription(
 
   const user = asUserRow(userRow);
   const updates = userUpdatesFor(user, snapshot, settings);
+
+  // Only when Cashfree disagrees with what we had. After the write above the two match, so the
+  // hourly reconcile sweep replaying the same subscription emits nothing — the local row is the
+  // natural dedupe, and a genuine flip back to ON_HOLD later is correctly counted again.
+  if (row.status !== snapshot.status) {
+    await trackServer({
+      event: "Subscription Status Changed",
+      distinctId: row.user_id,
+      // Bucketed to the minute so a burst of webhook retries that all failed before the write
+      // above collapses into one event rather than one per attempt.
+      insertId: `sub:${subscriptionId}:${row.status}:${snapshot.status}:` +
+        `${Math.floor(Date.now() / 60_000)}`,
+      properties: {
+        subscription_id: subscriptionId,
+        from_status: row.status,
+        to_status: snapshot.status,
+        // The named transitions worth alerting on, pre-computed so nobody has to reconstruct
+        // them from a pair of strings in every report.
+        transition: transitionName(row.status, snapshot.status),
+        billing_state: updates.billing_state ?? null,
+        payment_type: updates.payment_type ?? user.payment_type,
+        recurring_amount: snapshot.recurringAmount,
+        next_billing_at: snapshot.nextScheduleDate,
+        authorized_at: snapshot.authorizedAt,
+      },
+    });
+
+    // The one transition that ends the relationship gets its own event as well as the generic
+    // one. Not a duplicate: `Subscription Status Changed` is what makes every transition
+    // countable in one place, and a churn report should not have to know that a cancellation is
+    // spelled as a property of it — nor that it arrives under two different Cashfree words.
+    if (isCancelledStatus(snapshot.status)) {
+      await trackCancellation({
+        userId: row.user_id,
+        subscriptionId,
+        cancelledBy: cancelledBy(snapshot.status),
+        cfStatus: snapshot.status,
+        fromStatus: row.status,
+        wasInTrial: user.payment_type === "trial",
+        entitledUntil: user.current_period_end,
+        recurringAmount: snapshot.recurringAmount,
+        startedAt: user.subscription_started_at ?? snapshot.authorizedAt,
+      });
+    }
+
+    await setProfile(row.user_id, {
+      subscription_status: snapshot.status,
+      billing_state: updates.billing_state ?? null,
+      next_billing_at: snapshot.nextScheduleDate,
+      ...(updates.payment_type ? { payment_type: updates.payment_type } : {}),
+      ...(isCancelledStatus(snapshot.status)
+        ? {
+          cancelled_at: updates.cancelled_at ?? user.cancelled_at,
+          cancelled_by: cancelledBy(snapshot.status),
+        }
+        : {}),
+    });
+  }
 
   if (Object.keys(updates).length > 0) {
     const { error } = await db.from("users").update(updates).eq("user_id", user.user_id);
@@ -527,6 +710,18 @@ async function resolveDuplicateActive(
         failure_reason: `duplicate of ${other.subscription_id}`,
       })
       .eq("id", row.id);
+
+    // A real cancellation of a real mandate, and one the user never asked for. It leaves an
+    // authorisation amount needing a manual refund, so it has to be countable rather than only
+    // sitting in a log line — a run of these is a bug in checkout, not routine housekeeping.
+    await trackCancellation({
+      userId: row.user_id,
+      subscriptionId,
+      cancelledBy: "system",
+      cfStatus: "CANCELLED",
+      fromStatus: row.status,
+      reason: "duplicate_mandate",
+    });
   }
 
   return await syncSubscription(db, settings, subscriptionId, 1, withPayments);
@@ -613,6 +808,25 @@ export async function recordRefund(
   if (error) throw new Error(`subscription_refunds upsert failed: ${error.message}`);
 
   const userId = link?.userId;
+
+  await trackServer({
+    event: "Refund Recorded",
+    distinctId: userId ?? null,
+    insertId: `refund:${refund.cfRefundId}:${refund.status}`,
+    time: refund.refundTime,
+    properties: {
+      cf_refund_id: refund.cfRefundId,
+      cf_payment_id: refund.cfPaymentId,
+      amount: refund.amount,
+      currency: refund.currency,
+      refund_status: refund.status,
+      refund_reason: refund.reason,
+      // A refund we cannot tie to a subscription still needs counting — it usually means the
+      // charge it reverses was never recorded, which is a reconciliation gap worth seeing.
+      attributed: Boolean(userId),
+    },
+  });
+
   if (!userId || refund.status !== "SUCCESS") return;
 
   await recomputePaidPeriod(db, userId);
@@ -696,12 +910,32 @@ export async function recordDispute(
   if (error) throw new Error(`payment_disputes upsert failed: ${error.message}`);
 
   const userId = link?.userId;
+
+  await trackServer({
+    event: "Dispute Recorded",
+    distinctId: userId ?? null,
+    insertId: `dispute:${dispute.cfDisputeId}:${dispute.status}`,
+    properties: {
+      cf_dispute_id: dispute.cfDisputeId,
+      cf_payment_id: dispute.cfPaymentId,
+      amount: dispute.amount,
+      currency: dispute.currency,
+      dispute_status: dispute.status,
+      dispute_type: dispute.disputeType,
+      dispute_reason: dispute.reason,
+      respond_by: dispute.respondBy,
+      lost: isDisputeLost(dispute.status),
+      attributed: Boolean(userId),
+    },
+  });
+
   if (!userId) return;
 
   if (isDisputeLost(dispute.status)) {
     // The money is gone, so the month it bought is gone with it.
     await db.from("users").update({ billing_state: "disputed" }).eq("user_id", userId);
     await recomputePaidPeriod(db, userId);
+    await setProfile(userId, { billing_state: "disputed" });
     return;
   }
 
@@ -713,4 +947,6 @@ export async function recordDispute(
     .from("users")
     .update({ billing_state: open ? "disputed" : null })
     .eq("user_id", userId);
+
+  await setProfile(userId, { billing_state: open ? "disputed" : null });
 }

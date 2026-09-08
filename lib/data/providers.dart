@@ -4,6 +4,9 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../app/env.dart';
 import '../location_service.dart';
+import 'analytics/analytics.dart';
+import 'analytics/analytics_events.dart';
+import 'analytics/mixpanel_analytics.dart';
 import 'cashfree/cashfree_checkout.dart';
 import 'cashfree/upi_app_preference.dart';
 import 'deeplink_service.dart';
@@ -50,6 +53,44 @@ final appConfigRepositoryProvider = Provider<AppConfigRepository>((ref) {
 final appConfigProvider = FutureProvider<Map<String, String>>(
   (ref) => ref.watch(appConfigRepositoryProvider).load(),
 );
+
+/// Where events go.
+///
+/// Defaults to the no-op so tests and any build that never ran `bootMobileApp` behave exactly as
+/// they did before analytics existed. Boot overrides it with the same instance installed in the
+/// global holder, so the two can never disagree about which sink is live.
+final analyticsProvider = Provider<Analytics>((ref) => const NoopAnalytics());
+
+/// Starts Mixpanel once the fetched config arrives, and stamps the environment onto every event.
+///
+/// Watched by [Loc360App] so it runs for the life of the app. It is a no-op whenever boot already
+/// started Mixpanel from the cached config — which is every launch after the first — but it is
+/// what covers the first launch on a device, and it is also [appConfigProvider]'s first real
+/// consumer: nothing read that provider before this.
+final analyticsBootstrapProvider = FutureProvider<void>((ref) async {
+  final config = await ref.watch(appConfigProvider.future);
+
+  ref.read(analyticsProvider).registerSuper({
+    P.env: config.configString('env'),
+    P.backendMode: backendMode,
+  });
+
+  final analytics = ref.read(analyticsProvider);
+  if (analytics is MixpanelAnalytics) {
+    await analytics.start(config[mixpanelTokenKey]);
+  }
+});
+
+/// Which rung of the repository ladder below is live.
+///
+/// Sent with every event because without it a developer running on the fakes and a real user in
+/// production are indistinguishable in Mixpanel, and a handful of QA runs is enough to visibly
+/// move a conversion rate on a young project.
+String get backendMode {
+  if (Env.hasSupabase) return BackendMode.supabase;
+  if (Env.isConfigured) return BackendMode.fast2sms;
+  return BackendMode.fake;
+}
 
 /// Three rungs, best first, so the app is walkable at every level of configuration:
 ///

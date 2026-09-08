@@ -4,6 +4,8 @@ import '../app/assets.dart';
 import '../app/theme/app_colors.dart';
 import '../app/theme/app_theme.dart';
 import '../app/theme/app_typography.dart';
+import '../data/analytics/analytics.dart';
+import '../data/analytics/analytics_events.dart';
 import '../data/models/tracked_person.dart';
 import 'action_tile.dart';
 import 'app_icon.dart';
@@ -50,7 +52,16 @@ class PersonCard extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             InkWell(
-              onTap: _isConnected ? onToggle : null,
+              // Expanding and collapsing are reported as separate events rather than one toggle:
+              // how often a card is opened is a measure of the actions behind it being wanted,
+              // and folding the closes back in would halve it.
+              onTap: _isConnected
+                  ? trackedTap(
+                      onToggle,
+                      id: expanded ? 'person_card_collapse' : 'person_card_expand',
+                      properties: {P.state: person.status.name},
+                    )
+                  : null,
               // A long-press is the only affordance the design leaves for removal, and every
               // state needs one — including an invite that was sent to a wrong number.
               onLongPress: () => _confirmRemove(context),
@@ -118,8 +129,13 @@ class PersonCard extends StatelessWidget {
     final who = person.name.isEmpty ? person.phone : person.name;
     final isInvite = person.status == ShareStatus.invited;
 
+    analytics.track(Ev.personRemoveRequested, {P.state: person.status.name});
+
     final confirmed = await showDialog<bool>(
       context: context,
+      // Named so the navigator observer reports it as a real surface rather than as an anonymous
+      // route sitting on top of Home.
+      routeSettings: const RouteSettings(name: 'remove-person'),
       builder: (context) => AlertDialog(
         title: Text(isInvite ? 'Withdraw invite?' : 'Stop sharing with $who?'),
         content: Text(
@@ -140,6 +156,10 @@ class PersonCard extends StatelessWidget {
       ),
     );
 
+    analytics.track(
+      confirmed == true ? Ev.personRemoved : Ev.personRemoveCancelled,
+      {P.state: person.status.name},
+    );
     if (confirmed == true) onRemove();
   }
 }
@@ -186,7 +206,7 @@ class AddPersonCard extends StatelessWidget {
       borderRadius: AppShape.card,
       clipBehavior: Clip.antiAlias,
       child: InkWell(
-        onTap: onTap,
+        onTap: trackedTap(onTap, id: 'add_person_card', label: title),
         child: Padding(
           padding: const EdgeInsets.fromLTRB(15, 10, 12, 10),
           child: Row(

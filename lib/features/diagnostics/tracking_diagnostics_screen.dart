@@ -3,6 +3,8 @@ import 'dart:io' show Platform;
 
 import 'package:flutter/material.dart';
 
+import '../../data/analytics/analytics.dart';
+import '../../data/analytics/analytics_events.dart';
 import '../../location_service.dart';
 
 /// The pre-Figma tracking UI, kept intact so the native pipeline stays observable.
@@ -56,6 +58,13 @@ class _TrackingDiagnosticsScreenState extends State<TrackingDiagnosticsScreen> w
   Future<void> _refresh() async {
     final status = await _service.getStatus();
     if (mounted) setState(() => _status = status);
+    // Someone on this screen is troubleshooting. The permission and service state they are
+    // looking at is the most useful field report the app can produce without asking them to
+    // write one, so it is worth capturing alongside how often they come here.
+    analytics.track(Ev.diagnosticsRefreshed, {
+      P.permission: status.permission.name,
+      P.trackingActive: status.permission.canTrack,
+    });
   }
 
   Future<void> _run(Future<void> Function() action) async {

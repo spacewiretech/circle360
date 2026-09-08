@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../app/theme/app_colors.dart';
 import '../app/theme/app_theme.dart';
 import '../app/theme/app_typography.dart';
+import '../data/analytics/analytics.dart';
 import '../data/models/tracked_person.dart';
 import 'avatar.dart';
 
@@ -106,7 +107,7 @@ class _RequestButton extends StatelessWidget {
       borderRadius: AppShape.control,
       clipBehavior: Clip.antiAlias,
       child: InkWell(
-        onTap: onPressed,
+        onTap: trackedTap(onPressed, id: 'request_${label.toLowerCase()}', label: label),
         child: SizedBox(
           height: 40,
           child: Center(

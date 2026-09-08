@@ -86,13 +86,16 @@ class SupabaseSubscriptionRepository implements SubscriptionRepository {
     try {
       return await _functions.call(name, bearerToken: token);
     } on EdgeError catch (e) {
-      throw SubscriptionException(switch (e.code) {
-        'unauthorized' => 'Please sign in again.',
-        // The function's own message is already user-safe and more specific than anything
-        // that could be written here — it names the actual refusal.
-        'payment_failed' || 'throttled' || 'invalid_request' => e.message,
-        _ => 'Could not complete the payment. Please try again.',
-      });
+      throw SubscriptionException(
+        switch (e.code) {
+          'unauthorized' => 'Please sign in again.',
+          // The function's own message is already user-safe and more specific than anything
+          // that could be written here — it names the actual refusal.
+          'payment_failed' || 'throttled' || 'invalid_request' => e.message,
+          _ => 'Could not complete the payment. Please try again.',
+        },
+        code: e.code,
+      );
     }
   }
 }

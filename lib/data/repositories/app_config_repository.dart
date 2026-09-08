@@ -6,6 +6,14 @@ abstract interface class AppConfigRepository {
   Future<Map<String, String>> load();
 }
 
+/// The Mixpanel project token, served as a config row rather than compiled in.
+///
+/// Deliberately absent from [defaultAppConfig]: no row means no token, no token means the app
+/// runs on `NoopAnalytics`, and that is the correct behaviour for a checkout that has not been
+/// pointed at a Mixpanel project. A default here would instead send every developer's traffic to
+/// whichever project the constant named.
+const mixpanelTokenKey = 'mixpanel_token';
+
 /// Values the app falls back to when config has never been fetched and there is no network.
 ///
 /// A cold start must never block on the network, so these have to be good enough to run on.

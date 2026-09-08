@@ -11,6 +11,9 @@ import 'package:flutter_cashfree_pg_sdk/api/cftheme/cftheme.dart';
 import 'package:flutter_cashfree_pg_sdk/api/cfupi/cfupiutils.dart';
 import 'package:flutter_cashfree_pg_sdk/utils/cfenums.dart';
 
+import '../analytics/analytics.dart';
+import '../analytics/analytics_events.dart';
+import '../analytics/analytics_session.dart';
 import '../models/upi_app.dart';
 
 /// How the mandate flow ended.
@@ -87,6 +90,7 @@ class SdkCashfreeCheckout implements CashfreeCheckout {
 
   @override
   Future<List<UpiApp>> installedApps() async {
+    final started = DateTime.now();
     try {
       final raw = await CFUPIUtils().getUPIApps().timeout(_discoveryTimeout);
       final apps = UpiApp.listFrom(raw);
@@ -95,12 +99,25 @@ class SdkCashfreeCheckout implements CashfreeCheckout {
       // when someone is asking why the picker did not appear on their phone.
       debugPrint('[cashfree] ${apps.length} UPI app(s) found: '
           '${apps.map((a) => a.id).join(', ')}');
+      analytics.track(Ev.upiAppsDiscovered, {
+        P.count: apps.length,
+        P.appIds: apps.map((a) => a.id).toList(),
+        P.ms: DateTime.now().difference(started).inMilliseconds,
+      });
       return apps;
     } catch (error) {
       // Discovery is a convenience, not a requirement — a throw, a timeout or a platform that
       // has no such channel all mean the same thing here. Degrade to the checkout-screen
       // fallback; never let this break the paywall.
       debugPrint('[cashfree] could not list UPI apps: $error');
+      // The distinction the debugPrint above was making, finally kept somewhere it can be
+      // counted: on screen a failure is indistinguishable from a phone with no UPI app, and only
+      // one of those is a bug.
+      analytics.track(Ev.upiDiscoveryFailed, {
+        P.reason: error is TimeoutException ? 'timeout' : 'error',
+        P.error: error.toString(),
+        P.ms: DateTime.now().difference(started).inMilliseconds,
+      });
       return const [];
     }
   }
@@ -112,6 +129,10 @@ class SdkCashfreeCheckout implements CashfreeCheckout {
   }
 
   void _onVerify(String subscriptionId) {
+    analytics.track(Ev.checkoutVerifiedCallback, {
+      P.subscriptionId: subscriptionId,
+      P.secondsInCheckout: _secondsInCheckout,
+    });
     _complete(const CheckoutResult(CheckoutOutcome.verified));
   }
 
@@ -122,6 +143,17 @@ class SdkCashfreeCheckout implements CashfreeCheckout {
     // what tell them apart, and only this callback ever sees them.
     debugPrint('[cashfree] payment failed: status=${error.getStatus()} '
         'code=${error.getCode()} type=${error.getType()} message=${error.getMessage()}');
+    // Sent for the same reason it is logged: this callback is the only place in the app where
+    // Cashfree's own reason for a refusal exists, and a debugPrint on a user's phone helps
+    // nobody. `cf_code` is what separates "the user tapped cancel" from "the mandate was
+    // already spent" once these are aggregated.
+    analytics.track(Ev.checkoutFailedCallback, {
+      P.cfStatus: error.getStatus(),
+      P.cfCode: error.getCode(),
+      P.cfType: error.getType(),
+      P.message: error.getMessage(),
+      P.secondsInCheckout: _secondsInCheckout,
+    });
     _complete(CheckoutResult(CheckoutOutcome.failed, error.getMessage()));
   }
 
@@ -132,10 +164,22 @@ class SdkCashfreeCheckout implements CashfreeCheckout {
       // A result for an attempt nobody is waiting on — usually one that outlived the app being
       // killed. Harmless: the entitlement poll on the next screen covers it.
       debugPrint('[cashfree] payment result arrived with no pending request');
+      // Counted because it is the only measure of how often a mandate outlives the process it
+      // was started from — which is the case the whole status-polling screen exists to catch.
+      analytics.track(Ev.checkoutOrphanCallback, {P.outcome: result.outcome.name});
       return;
     }
     pending.complete(result);
   }
+
+  /// How long the user has been away in the UPI app or the Cashfree screen, for the callbacks.
+  int? get _secondsInCheckout {
+    final started = _startedAt;
+    if (started == null) return null;
+    return DateTime.now().difference(started).inSeconds;
+  }
+
+  DateTime? _startedAt;
 
   CFSubscriptionSession _session({
     required String subscriptionId,
@@ -154,7 +198,15 @@ class SdkCashfreeCheckout implements CashfreeCheckout {
   }
 
   /// Shared start/finish handling for both flows. [launch] builds and dispatches the payment.
-  Future<CheckoutResult> _run(void Function() launch) {
+  ///
+  /// [upiAppId] is null for the Cashfree checkout-screen fallback. It is only used to label the
+  /// hand-off, which is what lets the session tracker bracket the time the user spends outside
+  /// this process authorising the mandate.
+  Future<CheckoutResult> _run(void Function() launch, {String? upiAppId}) {
+    if (_pending != null && !_pending!.isCompleted) {
+      analytics.track(Ev.checkoutRestarted, {P.appId: upiAppId});
+    }
+
     // A second attempt cannot run over the first. Fail the old one rather than leaving its
     // future dangling forever.
     _complete(const CheckoutResult(CheckoutOutcome.failed, 'Payment restarted.'));
@@ -162,11 +214,18 @@ class SdkCashfreeCheckout implements CashfreeCheckout {
     _registerCallbacks();
     final completer = Completer<CheckoutResult>();
     _pending = completer;
+    _startedAt = DateTime.now();
+    analyticsSession.upiHandoffStarted(upiAppId);
 
     try {
       launch();
     } catch (error) {
       debugPrint('[cashfree] could not start the payment: $error');
+      analytics.track(Ev.checkoutLaunchFailed, {
+        P.appId: upiAppId,
+        P.error: error.toString(),
+      });
+      analyticsSession.upiHandoffFinished();
       _complete(const CheckoutResult(
         CheckoutOutcome.failed,
         'Could not open the payment screen. Please try again.',
@@ -178,9 +237,14 @@ class SdkCashfreeCheckout implements CashfreeCheckout {
       _timeout,
       onTimeout: () {
         _pending = null;
+        analytics.track(Ev.checkoutTimedOut, {
+          P.appId: upiAppId,
+          P.secondsInCheckout: _secondsInCheckout,
+        });
+        analyticsSession.upiHandoffFinished();
         return const CheckoutResult(CheckoutOutcome.failed, 'The payment timed out.');
       },
-    );
+    ).whenComplete(analyticsSession.upiHandoffFinished);
   }
 
   @override
@@ -215,7 +279,7 @@ class SdkCashfreeCheckout implements CashfreeCheckout {
             .setUPI(upi)
             .build(),
       );
-    });
+    }, upiAppId: upiAppId);
   }
 
   @override

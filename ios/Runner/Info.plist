@@ -35,6 +35,9 @@
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>location</string>
+		<!-- Lets FCM wake the app for a data message. The `location` entry above is the one the
+		     tracking service depends on; these two are independent and both are needed. -->
+		<string>remote-notification</string>
 	</array>
 	<key>UIApplicationSceneManifest</key>
 	<dict>

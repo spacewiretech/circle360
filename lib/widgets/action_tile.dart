@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import '../app/assets.dart';
 import '../app/theme/app_colors.dart';
 import '../app/theme/app_typography.dart';
+import '../data/analytics/analytics.dart';
+import '../data/analytics/analytics_events.dart';
 import '../data/models/tracked_person.dart';
 import 'app_icon.dart';
 
@@ -28,7 +30,12 @@ class ActionTile extends StatelessWidget {
       button: true,
       label: action.label,
       child: InkWell(
-        onTap: onTap,
+        onTap: trackedTap(
+          onTap,
+          id: 'person_action',
+          label: action.label,
+          properties: {P.action: action.name},
+        ),
         borderRadius: BorderRadius.circular(12),
         child: Padding(
           padding: const EdgeInsets.symmetric(vertical: 4),

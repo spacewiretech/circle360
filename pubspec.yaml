@@ -16,7 +16,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 1.0.1+2
+version: 1.0.1+5
 
 environment:
   sdk: ^3.12.2
@@ -56,11 +56,44 @@ dependencies:
   # Cashfree UPI Autopay checkout. Only ever handed a session id minted by an Edge Function —
   # no Cashfree credential reaches the device.
   flutter_cashfree_pg_sdk: ^2.4.0
+  # Product analytics. The project token is deliberately not compiled in — it comes from the
+  # `app_config` table at runtime, so tracking can be turned off server-side without a release,
+  # and a checkout with no token simply runs on the no-op implementation.
+  mixpanel_flutter: ^2.13.0
+  # Version and build number in Dart. Mixpanel's native SDKs already attach their own
+  # `$app_version_string`, so this is not for reporting the version — it is so the app can
+  # compare the running version against the last one it saw and tell a fresh install from an
+  # upgrade, which nothing else can answer.
+  package_info_plus: ^10.2.1
   # Invites go out through the phone's own SMS app rather than a bulk SMS route: the Fast2SMS
   # account is a DLT-registered OTP template, and invite text is not OTP traffic.
   # ^13 rather than ^12: the older line pins win32 ^5, which collides with the one
   # flutter_secure_storage needs.
   share_plus: ^13.3.0
+
+  # Firebase. Only ever initialised by the phone build — `lib/boot/mobile_boot.dart` keeps the
+  # whole app tree out of the web output, so the marketing site never loads any of this.
+  #
+  # Config comes from `lib/firebase_options.dart`, written by hand from the console's own
+  # google-services.json / GoogleService-Info.plist rather than by the FlutterFire CLI.
+  #
+  # Note for the Android side: do NOT also add the `firebase-bom` and `firebase-analytics`
+  # Gradle dependencies from Firebase's native setup guide. Each plugin below already declares
+  # its own pinned native artifact, and a second BoM at the app level only puts them out of step
+  # with each other. Applying the two Gradle plugins is the whole of the native wiring.
+  firebase_core: ^4.14.0
+  # Runs alongside Mixpanel rather than replacing it: Mixpanel owns the named, hand-curated
+  # funnel, this is here for the automatic events (first_open, session_start, app_update) that
+  # Google Ads and Play Console read and that Mixpanel cannot supply.
+  firebase_analytics: ^12.5.0
+  # The app's first real crash reporter. Until now the only field signal was the `App Crashed`
+  # Mixpanel event in `mobile_boot_io.dart`, which carries three stack frames and never sees a
+  # native crash at all. That event is deliberately kept — see `_reportUncaughtErrors`.
+  firebase_crashlytics: ^5.3.0
+  # Push. Wired but deliberately silent: nothing requests notification permission until
+  # `PushMessaging.requestPermission()` is called from a screen, so no user is prompted out of
+  # context on first launch.
+  firebase_messaging: ^16.6.0
 
 dev_dependencies:
   flutter_test:

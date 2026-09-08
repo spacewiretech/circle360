@@ -27,8 +27,10 @@ class OtpView extends ConsumerStatefulWidget {
 class _OtpViewState extends ConsumerState<OtpView> {
   final _otpController = OtpFieldController();
 
-  Future<void> _submit() async {
-    final next = await ref.read(onboardingViewModelProvider.notifier).verifyOtp();
+  Future<void> _submit({bool autoSubmitted = false}) async {
+    final next = await ref
+        .read(onboardingViewModelProvider.notifier)
+        .verifyOtp(autoSubmitted: autoSubmitted);
     if (!mounted) return;
     if (next == null) {
       // The ViewModel has already dropped the code; clear the boxes to match and refocus.
@@ -70,13 +72,14 @@ class _OtpViewState extends ConsumerState<OtpView> {
             length: OnboardingState.otpLength,
             controller: _otpController,
             onChanged: viewModel.setCode,
-            onCompleted: (_) => _submit(),
+            onCompleted: (_) => _submit(autoSubmitted: true),
           ),
           const SizedBox(height: 12),
           _ResendRow(state: state, onResend: _resend),
         ],
       ),
       buttonLabel: 'continue',
+      analyticsId: 'otp_continue',
       busy: state.busy,
       error: state.error,
       onContinue: state.canVerify ? _submit : null,
@@ -112,7 +115,10 @@ class _ResendRow extends StatelessWidget {
     return Align(
       alignment: Alignment.centerLeft,
       child: GestureDetector(
-        onTap: state.canResend ? onResend : null,
+        // Always wired, even when resend is unavailable. The ViewModel is what decides, and it
+        // records the refusal — with a null handler here a user tapping a dead "Resend code"
+        // would leave no trace at all, which is precisely the moment worth knowing about.
+        onTap: onResend,
         behavior: HitTestBehavior.opaque,
         child: Padding(
           padding: const EdgeInsets.symmetric(vertical: 4),

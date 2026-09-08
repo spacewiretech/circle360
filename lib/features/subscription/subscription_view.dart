@@ -6,6 +6,8 @@ import '../../app/router.dart';
 import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_theme.dart';
 import '../../app/theme/app_typography.dart';
+import '../../data/analytics/analytics.dart';
+import '../../data/analytics/analytics_events.dart';
 import '../../data/fake/fake_session.dart';
 import '../../data/models/subscription_offer.dart';
 import '../../data/models/upi_app.dart';
@@ -20,8 +22,34 @@ import 'subscription_viewmodel.dart';
 ///
 /// This screen is the gate: there is no route out of it except a confirmed subscription, so it
 /// deliberately cannot be dismissed with the system back gesture.
-class SubscriptionView extends ConsumerWidget {
+class SubscriptionView extends ConsumerStatefulWidget {
   const SubscriptionView({super.key});
+
+  @override
+  ConsumerState<SubscriptionView> createState() => _SubscriptionViewState();
+}
+
+class _SubscriptionViewState extends ConsumerState<SubscriptionView> {
+  @override
+  void initState() {
+    super.initState();
+    // Stateful purely for this. `Paywall Offer Loaded` cannot stand in as the view event: the
+    // ViewModel is not autoDispose, so `_load` runs once for the life of the app and a user sent
+    // back here by a failed payment or a lapsed trial would never be counted a second time.
+    //
+    // Deferred a frame because the navigator observer's `Screen Viewed` for this route is emitted
+    // as part of the same navigation, and the two read better in that order.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final state = ref.read(subscriptionViewModelProvider);
+      analytics.track(Ev.paywallViewed, {
+        P.trialAvailable: state.trialAvailable,
+        // Whether the flags above are authoritative yet. The offer is still in flight on a first
+        // view, and `trial_available` defaults to true until the user's history comes back.
+        P.state: state.loading ? 'loading' : 'loaded',
+      });
+    });
+  }
 
   Future<void> _pickApp(
     BuildContext context,
@@ -29,14 +57,32 @@ class SubscriptionView extends ConsumerWidget {
     List<UpiApp> apps,
     String? selectedId,
   ) async {
+    analytics.track(Ev.upiPickerOpened, {
+      P.appId: selectedId,
+      P.availableCount: apps.length,
+    });
+
     final chosen = await showModalBottomSheet<String>(
       context: context,
       backgroundColor: Colors.transparent,
+      // Named so the observer reports the sheet as its own surface rather than as an anonymous
+      // route over the paywall.
+      routeSettings: const RouteSettings(name: 'upi-picker'),
       builder: (_) => _UpiAppSheet(apps: apps, selectedId: selectedId),
     );
-    if (chosen != null) {
-      ref.read(subscriptionViewModelProvider.notifier).selectApp(chosen);
+
+    if (chosen == null) {
+      // Opening the picker and backing out is a real signal — the user looked for their bank's
+      // app and did not find it — and until now it left no trace at all: a null result was
+      // simply dropped.
+      analytics.track(Ev.upiPickerDismissed, {
+        P.appId: selectedId,
+        P.availableCount: apps.length,
+      });
+      return;
     }
+
+    ref.read(subscriptionViewModelProvider.notifier).selectApp(chosen);
   }
 
   Future<void> _subscribe(BuildContext context, WidgetRef ref) async {
@@ -50,7 +96,7 @@ class SubscriptionView extends ConsumerWidget {
   }
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     final state = ref.watch(subscriptionViewModelProvider);
     final offer = state.offer;
 
@@ -58,6 +104,14 @@ class SubscriptionView extends ConsumerWidget {
       // Back must not slip past the paywall. Onboarding is already behind us at this point,
       // so there is nowhere legitimate for it to go.
       canPop: false,
+      // The refusal is worth recording. A user pressing back repeatedly on the paywall is
+      // trying to leave and cannot, and that is invisible everywhere else — the navigator
+      // observer only ever sees pops that actually happened.
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) {
+          analytics.track(Ev.backPressed, {P.screen: 'Paywall', P.blocked: true});
+        }
+      },
       child: Scaffold(
         // A Stack sizes itself to its non-positioned children, so it is told to fill
         // the screen — otherwise Positioned.fill resolves against a collapsed box.
@@ -129,6 +183,10 @@ class SubscriptionView extends ConsumerWidget {
                             : state.trialAvailable
                                 ? 'Start ${offer.trialDays}-day trial · ${offer.trialPrice}'
                                 : 'Subscribe · ${offer.planPrice}/month',
+                        // Pinned because the label carries the price and the trial length, both
+                        // of which come from config: without this the app's single most
+                        // important button would change id whenever the pricing copy changed.
+                        analyticsId: 'subscribe',
                         busy: state.busy,
                         onPressed:
                             state.canSubscribe ? () => _subscribe(context, ref) : null,

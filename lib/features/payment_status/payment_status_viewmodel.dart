@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../data/analytics/analytics_events.dart';
 import '../../data/entitlement.dart';
 import '../../data/providers.dart';
 import '../subscription/subscription_viewmodel.dart';
@@ -44,16 +45,26 @@ class PaymentStatusState {
 class PaymentStatusViewModel extends Notifier<PaymentStatusState> {
   Timer? _timer;
 
+  /// When the wait began, so a late confirmation can report how long it actually took. That
+  /// number is the argument for how long this screen should keep asking.
+  DateTime? _waitingSince;
+
   @override
   PaymentStatusState build() {
     ref.onDispose(() => _timer?.cancel());
     return const PaymentStatusState();
   }
 
+  /// Joins every event on this screen back to the attempt that produced it. The paywall's
+  /// notifier outlives the navigation here, which is what makes this readable at all.
+  String? get _attemptId =>
+      ref.read(subscriptionViewModelProvider.notifier).attemptId;
+
   /// Starts the backoff. Safe to call more than once; a second call is ignored while a poll is
   /// already scheduled.
   void start() {
     if (_timer != null || state.confirmed) return;
+    _waitingSince = DateTime.now();
     _scheduleNext();
   }
 
@@ -73,9 +84,21 @@ class PaymentStatusViewModel extends Notifier<PaymentStatusState> {
   }
 
   /// Asks the server once, then re-arms unless it has an answer. Also what the button calls.
-  Future<void> check() async {
+  ///
+  /// [trigger] says what asked — the backoff timer, the app coming back from the UPI app, or the
+  /// user pressing the button. Worth separating: a user who has to press the button before their
+  /// payment confirms is having a different experience from one whose timer got there first, and
+  /// the two are indistinguishable in the outcome alone.
+  Future<void> check({String trigger = 'auto'}) async {
     if (state.checking || state.confirmed) return;
     state = state.copyWith(checking: true, attempts: state.attempts + 1);
+
+    final analytics = ref.read(analyticsProvider);
+    analytics.track(Ev.paymentStatusChecked, {
+      P.trigger: trigger,
+      P.attempt: state.attempts,
+      P.paymentAttemptId: _attemptId,
+    });
 
     try {
       final user = await ref.read(subscriptionRepositoryProvider).refreshStatus();
@@ -85,15 +108,44 @@ class PaymentStatusViewModel extends Notifier<PaymentStatusState> {
         _timer?.cancel();
         _timer = null;
         state = state.copyWith(checking: false, confirmed: true);
+        // The case this whole screen exists for: money that moved, but not before the paywall's
+        // own thirty-second poll gave up. How long it really took is the only evidence for
+        // whether that poll is too short.
+        analytics.track(Ev.paymentConfirmedLate, {
+          P.attempts: state.attempts,
+          P.trigger: trigger,
+          P.paymentAttemptId: _attemptId,
+          if (_waitingSince != null)
+            P.secondsSinceCheckout:
+                DateTime.now().difference(_waitingSince!).inSeconds,
+        });
         return;
       }
     } catch (error) {
       // A dropped poll is not a failed payment. Keep asking — giving up here would tell a
       // paying user they had not paid.
       debugPrint('[payment-status] poll failed: $error');
+      analytics.track(Ev.entitlementPollFailed, {
+        P.attempt: state.attempts,
+        P.error: error.toString(),
+        P.paymentAttemptId: _attemptId,
+      });
     }
 
     state = state.copyWith(checking: false);
+
+    if (state.exhausted) {
+      // Twelve attempts and still nothing. Either the webhook is slow enough to need a longer
+      // backoff, or these payments never happened — and the two need opposite fixes.
+      analytics.track(Ev.paymentStatusExhausted, {
+        P.attempts: state.attempts,
+        P.paymentAttemptId: _attemptId,
+        if (_waitingSince != null)
+          P.secondsSinceCheckout:
+              DateTime.now().difference(_waitingSince!).inSeconds,
+      });
+    }
+
     _scheduleNext();
   }
 }

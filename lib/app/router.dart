@@ -1,3 +1,5 @@
+import 'package:firebase_analytics/firebase_analytics.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'package:go_router/go_router.dart';
 
 import '../features/diagnostics/tracking_diagnostics_screen.dart';
@@ -15,6 +17,7 @@ import '../features/settings/settings_view.dart';
 import '../features/splash/splash_view.dart';
 import '../features/splash/splash_viewmodel.dart';
 import '../features/subscription/subscription_view.dart';
+import 'analytics_observer.dart';
 import 'entitlement_gate.dart';
 
 abstract final class Routes {
@@ -55,6 +58,24 @@ extension SplashDestinationRoute on SplashDestination {
 /// decides where it goes next, so there is no global redirect to keep in sync.
 final appRouter = GoRouter(
   initialLocation: Routes.splash,
+  // One observer instruments every screen, every modal and every back gesture in the app. Doing
+  // it here rather than per-screen means a route added later is tracked the moment it is
+  // routable, with nothing to remember.
+  //
+  // Firebase gets its own parallel `screen_view` stream rather than reading Mixpanel's: the two
+  // name screens differently on purpose — `analyticsObserver` maps route patterns to the
+  // hand-written names in `_screenNames`, which is what the Mixpanel reports are built on.
+  //
+  // The guard is load-bearing. `appRouter` is a top-level `final`, so it is constructed the
+  // moment anything imports this file — and `test/analytics_test.dart` and
+  // `test/subscription_test.dart` both import it directly, without ever booting Firebase. An
+  // unguarded `FirebaseAnalytics.instance` would throw `[core/no-app]` at import time and take
+  // both suites down with it. `Firebase.apps` reads a local list and is safe uninitialised.
+  observers: [
+    analyticsObserver,
+    if (Firebase.apps.isNotEmpty)
+      FirebaseAnalyticsObserver(analytics: FirebaseAnalytics.instance),
+  ],
   routes: [
     GoRoute(path: Routes.splash, builder: (context, state) => const SplashView()),
     GoRoute(path: Routes.invite, builder: (context, state) => const InviteView()),

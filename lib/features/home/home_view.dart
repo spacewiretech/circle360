@@ -9,9 +9,12 @@ import '../../app/router.dart';
 import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_theme.dart';
 import '../../app/theme/app_typography.dart';
+import '../../data/analytics/analytics.dart';
+import '../../data/analytics/analytics_events.dart';
 import '../../data/entitlement.dart';
 import '../../data/fake/fake_session.dart';
 import '../../data/location/location_controller.dart';
+import '../../data/providers.dart';
 import '../../location_service.dart';
 import '../../widgets/add_person_sheet.dart';
 import '../../widgets/avatar.dart';
@@ -31,19 +34,40 @@ import 'home_viewmodel.dart';
 /// of an "Add" tap, reads as the app having done something on the user's behalf — and what it
 /// is about to do is message a third party.
 Future<void> _addPerson(BuildContext context, WidgetRef ref) async {
+  final analytics = ref.read(analyticsProvider);
+  analytics.track(Ev.addPersonSheetOpened, {P.source: 'home'});
+
   final draft = await showAddPersonSheet(context, title: 'Add Person');
-  if (draft == null) return;
+  if (draft == null) {
+    analytics.track(Ev.addPersonSheetDismissed, {P.source: 'home'});
+    return;
+  }
 
   final result = await ref
       .read(homeViewModelProvider.notifier)
       .addPerson(name: draft.name, phone: draft.phone);
 
   final shareText = result?.shareText;
+  // A null result is the ViewModel refusing — a duplicate, the three-person cap, or a failed
+  // call. A non-null result with no share text is the happy path: the number is already a user
+  // and the two are now connected without an invite ever being needed.
+  analytics.track(
+    result == null ? Ev.addPersonFailed : Ev.addPersonSubmitted,
+    {
+      P.source: 'home',
+      P.isExistingUser: result == null ? null : shareText == null,
+      if (result == null) P.message: ref.read(homeViewModelProvider).message,
+    },
+  );
+
   if (shareText == null || !context.mounted) return;
 
   final who = draft.name.trim().isEmpty ? 'They' : draft.name.trim();
+  analytics.track(Ev.inviteDialogShown);
   final send = await showDialog<bool>(
     context: context,
+    // Named so the observer reports the confirmation as its own surface.
+    routeSettings: const RouteSettings(name: 'invite-confirm'),
     builder: (context) => AlertDialog(
       title: Text('$who isn\'t on Loc360 yet'),
       content: Text(
@@ -64,7 +88,12 @@ Future<void> _addPerson(BuildContext context, WidgetRef ref) async {
   );
 
   if (send == true) {
+    analytics.track(Ev.inviteSent, {P.source: 'home'});
     await SharePlus.instance.share(ShareParams(text: shareText));
+  } else {
+    // Reaching the invite dialog and declining is a different outcome from never getting there,
+    // and it is the step where an added person quietly fails to become a connection.
+    analytics.track(Ev.inviteDialogDismissed, {P.source: 'home'});
   }
 }
 
@@ -83,6 +112,10 @@ class _HomeViewState extends ConsumerState<HomeView> with WidgetsBindingObserver
 
   /// Tall enough for an open card's action row to clear the bottom of the screen.
   static const _expandedSheetSize = 0.72;
+
+  /// `Home Viewed` waits for the first snapshot, so it can carry the counts that make it useful.
+  /// The observer's own `Screen Viewed` already covers the bare arrival.
+  bool _reportedView = false;
 
   @override
   void initState() {
@@ -117,6 +150,25 @@ class _HomeViewState extends ConsumerState<HomeView> with WidgetsBindingObserver
   Widget build(BuildContext context) {
     final state = ref.watch(homeViewModelProvider);
     final location = ref.watch(locationControllerProvider);
+
+    if (!state.loading && !_reportedView) {
+      _reportedView = true;
+      analytics.track(Ev.homeViewed, {
+        P.peopleCount: state.people.length,
+        P.requestsCount: state.requests.length,
+        P.state: state.people.isEmpty ? 'empty' : 'list',
+        P.trackingActive: location.permission.canTrack,
+        P.permission: location.permission.name,
+      });
+    }
+
+    // The mandate warning, reported once per state rather than once per rebuild. Whether it is
+    // ever seen is the precondition for `Manage Billing Tapped` meaning anything.
+    ref.listen(entitlementProvider.select((user) => user?.billingState), (_, billing) {
+      if (billing != null) {
+        analytics.track(Ev.billingIssueShown, {P.billingState: billing.name});
+      }
+    });
 
     // Action confirmations surface as a SnackBar, then are cleared so they fire once.
     ref.listen(homeViewModelProvider.select((s) => s.message), (_, message) {
@@ -230,7 +282,15 @@ class _StatusStrip extends ConsumerWidget {
           TrackingBanner(
             message: billing.message,
             actionLabel: 'Manage',
-            onTap: () => context.push(Routes.settings),
+            // The banner is a paying user's only warning that their mandate is about to stop
+            // collecting. How many people it reaches, and how many act on it, is the difference
+            // between recoverable churn and silent churn.
+            onTap: () {
+              analytics.track(Ev.manageBillingTapped, {
+                P.billingState: billing.name,
+              });
+              context.push(Routes.settings);
+            },
           ),
           const SizedBox(height: 8),
         ],
@@ -241,6 +301,9 @@ class _StatusStrip extends ConsumerWidget {
                 ? 'Settings'
                 : 'Turn on',
             onTap: () {
+              analytics.track(Ev.trackingBannerTapped, {
+                P.permission: location.permission.name,
+              });
               final controller = ref.read(locationControllerProvider.notifier);
               if (location.permission == LocationPermission.deniedForever) {
                 controller.openAppSettings();
