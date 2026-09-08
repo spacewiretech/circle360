@@ -21,6 +21,13 @@ plugins {
     id("dev.flutter.flutter-plugin-loader") version "1.0.0"
     id("com.android.application") version "9.0.1" apply false
     id("org.jetbrains.kotlin.android") version "2.3.20" apply false
+    // Reads android/app/google-services.json and turns it into the resources the Firebase SDKs
+    // look up at runtime. Declared here rather than in a root `buildscript` block because this
+    // project uses the declarative settings plugins DSL — Firebase's own docs show the older
+    // root-build.gradle form, which has nowhere to go in a layout like this one.
+    id("com.google.gms.google-services") version "4.5.0" apply false
+    // Uploads the mapping file so release stack traces are deobfuscated in the console.
+    id("com.google.firebase.crashlytics") version "3.0.8" apply false
 }
 
 include(":app")

@@ -1,5 +1,8 @@
 import 'dart:ui' show PlatformDispatcher;
 
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_crashlytics/firebase_crashlytics.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -15,14 +18,37 @@ import '../data/analytics/mixpanel_analytics.dart';
 import '../data/providers.dart';
 import '../data/repositories/app_config_repository.dart';
 import '../data/supabase/supabase_app_config_repository.dart';
+import '../firebase_options.dart';
 
 export '../app/app.dart' show Loc360App;
 
-/// Boots the phone app: environment, Supabase, analytics, then the widget tree.
+/// Handles a push that arrives while the app is backgrounded or not running.
+///
+/// Top-level and `vm:entry-point` because Flutter spins up a *separate* isolate for it: there is
+/// no widget tree, no `ProviderScope` and none of the state this file sets up, so anything it
+/// needs it has to build for itself. Registering it is what stops FCM warning that a background
+/// message was dropped; it does nothing else yet, deliberately — see `PushMessaging`.
+@pragma('vm:entry-point')
+Future<void> _onBackgroundMessage(RemoteMessage message) async {
+  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+  debugPrint('[push] background message ${message.messageId}');
+}
+
+/// Boots the phone app: Firebase, environment, Supabase, analytics, then the widget tree.
 ///
 /// Lives here rather than in `main()` so the web build never reaches the app tree — see
 /// [mobile_boot.dart] for why that matters.
 Future<void> bootMobileApp() async {
+  // First, because Crashlytics cannot report anything that happens before it and the analytics
+  // startup below is the most interesting part of the boot. Non-fatal on the same principle as
+  // Supabase: a project misconfiguration must not be the reason the app fails to open.
+  try {
+    await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+    FirebaseMessaging.onBackgroundMessage(_onBackgroundMessage);
+  } catch (error) {
+    debugPrint('Firebase init failed, continuing without it: $error');
+  }
+
   await Env.load();
 
   if (Env.hasSupabase) {
@@ -89,14 +115,19 @@ Future<Analytics> _startAnalytics() async {
   return analytics;
 }
 
-/// Sends crashes to Mixpanel as events.
+/// Sends crashes to Crashlytics, and to Mixpanel as events.
 ///
-/// There is no crash reporter in this app at all, so this is the only thing that will ever notice
-/// a framework exception in the field. It deliberately chains to the previous handler rather than
-/// replacing it, so the red screen and the console output still happen in debug.
+/// Both, not one: Crashlytics gets the full stack, the device state and the native crashes that
+/// Dart never sees, while the Mixpanel `App Crashed` event stays because it is what the existing
+/// reports and funnels are built on — it sits in the same event stream as everything else the
+/// user did beforehand, which is the one thing a crash reporter cannot show you.
+///
+/// It deliberately chains to the previous handler rather than replacing it, so the red screen
+/// and the console output still happen in debug.
 void _reportUncaughtErrors() {
   final previous = FlutterError.onError;
   FlutterError.onError = (details) {
+    _recordCrash(() => FirebaseCrashlytics.instance.recordFlutterError(details));
     analytics.track(Ev.appCrashed, {
       P.error: details.exceptionAsString(),
       P.stackHead: _stackHead(details.stack),
@@ -106,15 +137,38 @@ void _reportUncaughtErrors() {
   };
 
   PlatformDispatcher.instance.onError = (error, stack) {
+    _recordCrash(
+      () => FirebaseCrashlytics.instance.recordError(error, stack, fatal: true),
+    );
     analytics.track(Ev.appCrashed, {
       P.error: error.toString(),
       P.stackHead: _stackHead(stack),
       P.fatal: true,
     });
     // False: this handler exists to observe, not to swallow. Returning true would suppress the
-    // default reporting that is currently the only other signal anyone has.
+    // default reporting, and the red screen with it.
     return false;
   };
+}
+
+/// Runs a Crashlytics call, swallowing anything it throws.
+///
+/// This is inside the two error handlers themselves. If `Firebase.initializeApp` failed at boot
+/// then `FirebaseCrashlytics.instance` throws `[core/no-app]`, and an exception thrown *from*
+/// `FlutterError.onError` is not caught by anything — it would turn every reportable error into
+/// a second, worse one and lose the Mixpanel event that follows it.
+///
+/// Both halves are needed: the `try` catches the instance getter, which throws synchronously
+/// before there is any future to fail, and `catchError` catches the recording itself, which
+/// fails later and would otherwise surface as an unhandled async error.
+void _recordCrash(Future<void> Function() record) {
+  try {
+    record().catchError((Object error) {
+      debugPrint('[crashlytics] could not record: $error');
+    });
+  } catch (error) {
+    debugPrint('[crashlytics] could not record: $error');
+  }
 }
 
 /// The first few frames of a stack trace.

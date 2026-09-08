@@ -7,6 +7,12 @@
     <!-- Needed so the boot/restart receiver can resume tracking while the app is not visible. -->
     <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION"/>
 
+    <!-- The app is advertised through Facebook Ads, which attributes installs by advertising ID.
+         Declared by hand rather than pulled in with an SDK: Play reads this permission off the
+         uploaded bundle to decide whether to ask the advertising-ID questions in Data safety, and
+         without it the store treats the app as not touching the ad ID at all. -->
+    <uses-permission android:name="com.google.android.gms.permission.AD_ID"/>
+
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
     <!-- Android 14+ requires the type-specific permission alongside the service type. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION"/>
@@ -106,6 +112,19 @@
         <meta-data
             android:name="cashfree_subscription_flow_enable"
             android:value="true" />
+
+        <!-- Where FCM puts a notification message that names no channel of its own. Without it
+             Android 8+ has no channel to post to and drops the notification without a trace.
+             POST_NOTIFICATIONS is already declared above for the tracking service's ongoing
+             notification, so push needs no permission of its own here. -->
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_channel_id"
+            android:value="@string/default_notification_channel_id" />
+
+        <!-- TODO: add `com.google.firebase.messaging.default_notification_icon` pointing at a
+             white-silhouette drawable. Until one exists, Android 5.0+ falls back to the launcher
+             icon and renders it as a solid white square in the status bar. Needs a design asset,
+             not a code change. -->
 
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->

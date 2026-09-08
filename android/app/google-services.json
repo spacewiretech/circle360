@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "470770545311",
+    "project_id": "circle360-ac46d",
+    "storage_bucket": "circle360-ac46d.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:470770545311:android:42880ea6f0bf15688d28aa",
+        "android_client_info": {
+          "package_name": "com.spacewire.circle360"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAf6Sk_lB9suT422Cy7I1bIpUEw7QRg2lE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -1,5 +1,7 @@
-# Uncomment this line to define a global platform for your project
-# platform :ios, '13.0'
+# 15.0, not the template's 13.0: firebase_core 4.x pins the Firebase iOS SDK 12.x line, whose
+# podspec declares a 15.0 deployment target. CocoaPods refuses to resolve below it, so this is
+# the floor for as long as the app has Firebase in it.
+platform :ios, '15.0'
 
 # CocoaPods analytics sends network stats synchronously affecting flutter build latency.
 ENV['COCOAPODS_DISABLE_STATS'] = 'true'

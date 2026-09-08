@@ -56,17 +56,18 @@ Deno.serve(async (req) => {
   let result: VerifyResult;
   if (review && review.mobile === mobile) {
     warnReviewAccount("verify-otp");
-    // The code is fixed and never rotates, so this is the only thing standing between a
-    // guessed number and the account. Throttled before the comparison, so a wrong guess costs
-    // an attempt whether or not it was close.
-    if (!await consumeReviewVerifyQuota(db, mobile)) {
+    // The code is fixed and never rotates, so this is the only thing standing between a guessed
+    // number and the account. Only wrong guesses are charged — the cap is still applied before
+    // the verdict is honoured, so being right buys nothing once it is hit.
+    const correct = otp === review.otp;
+    if (!await consumeReviewVerifyQuota(db, mobile, correct)) {
       return fail(
         "throttled",
         "Too many attempts for this number. Please try again later.",
         429,
       );
     }
-    result = otp === review.otp ? "verified" : "wrong_code";
+    result = correct ? "verified" : "wrong_code";
   } else if (devOtpEnabled(config)) {
     warnDevOtp("verify-otp");
     // Only the SMS check is stubbed. Everything below is the real path — a real users row

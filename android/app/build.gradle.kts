@@ -5,6 +5,10 @@ plugins {
     id("com.android.application")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
+    // Versions are declared in settings.gradle.kts. Both must come after the Flutter plugin:
+    // they attach to the variants it configures, and applied earlier they find none.
+    id("com.google.gms.google-services")
+    id("com.google.firebase.crashlytics")
 }
 
 val keystoreProperties = Properties()
