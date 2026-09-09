@@ -47,6 +47,11 @@ app.*.map.json
 # Secrets — never commit. See assets/env/app.env.example for the template.
 assets/env/app.env
 
+# Facebook App ID and Client Token for iOS. Public values, but per-environment — see
+# ios/Flutter/Facebook.xcconfig.example, which is committed and documents both. The Android half
+# of the same pair is ignored by android/.gitignore.
+/ios/Flutter/Facebook.xcconfig
+
 # Supabase CLI local state
 supabase/.temp/
 supabase/.branches/

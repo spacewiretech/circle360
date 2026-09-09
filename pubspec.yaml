@@ -70,6 +70,13 @@ dependencies:
   # ^13 rather than ^12: the older line pins win32 ^5, which collides with the one
   # flutter_secure_storage needs.
   share_plus: ^13.3.0
+  # The paywall promo. Its URL is a public `app_config` row, so the clip can be recut, re-hosted
+  # or withdrawn without a release — the same argument as `mixpanel_token`.
+  #
+  # No native wiring needed: Android already holds INTERNET, and the plugin's minSdk 24 is
+  # exactly `flutter.minSdkVersion`. iOS specifically must NOT get the `audio` background mode —
+  # see the lifecycle notes in `promo_video.dart` for why.
+  video_player: ^2.14.0
 
   # Firebase. Only ever initialised by the phone build — `lib/boot/mobile_boot.dart` keeps the
   # whole app tree out of the web output, so the marketing site never loads any of this.
@@ -95,12 +102,35 @@ dependencies:
   # context on first launch.
   firebase_messaging: ^16.6.0
 
+  # Ad attribution. The app is bought through Facebook Ads, so Facebook needs to be told which
+  # installs went on to pay — without that its optimiser is training on installs, not on payers.
+  #
+  # A third sink beside Mixpanel and Firebase rather than a replacement, and a deliberately quiet
+  # one: it receives four conversion events out of the ~70 this app fires. See
+  # `facebook_analytics.dart` for why the rest are dropped rather than forwarded.
+  facebook_app_events: ^0.30.5
+
+  # iOS hands out no IDFA without an App Tracking Transparency prompt, and Facebook cannot
+  # attribute an install to an ad without one. The prompt is deliberately not shown at launch —
+  # see `att_consent.dart`.
+  app_tracking_transparency: ^2.0.6
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
 
   # Build-time only: it generates the launcher icons and is never imported by the app.
   flutter_launcher_icons: ^0.14.4
+
+  # For InMemorySharedPreferencesAsync, which lets the Facebook purchase guard be tested for what
+  # it actually promises — that it survives the process being killed mid-payment.
+  shared_preferences_platform_interface: ^2.4.1
+
+  # `video_player` re-exports its options classes but not `VideoPlayerPlatform` itself, so a fake
+  # player has to reach for the interface package directly. That fake is what lets the promo
+  # warm-up be tested for the thing that actually matters — that a controller is handed over
+  # exactly once — without a device or a network.
+  video_player_platform_interface: ^6.9.0
 
   # The "flutter_lints" package below contains a set of recommended lints to
   # encourage good coding practices. The lint set provided by the package is

@@ -16,6 +16,12 @@ analyzer:
     # different mockito version than this project resolves — analysed, the Firebase plugins alone
     # contribute several hundred errors that no change here could ever fix.
     - build/**
+    - android/**
+    - ios/**
+    - web/**
+    - windows/**
+    - macos/**
+    - linux/**
 
 linter:
   # The lint rules applied to this project can be customized in the

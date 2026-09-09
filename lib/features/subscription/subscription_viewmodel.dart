@@ -65,7 +65,16 @@ class SubscriptionState {
 
   /// A returning subscriber — lapsed, cancelled, or a trial already spent — is not offered the
   /// ₹3 again. Only an account that has never authorised a mandate sees the trial price.
-  bool get trialAvailable => !(user?.hasEverSubscribed ?? false);
+  ///
+  /// The server's answer wins. This used to be derived here and only here, and it was never sent
+  /// anywhere: `subscription-start` built a ₹3 mandate for everybody, so a returning user read
+  /// "Subscribe · ₹499/month" on this screen and was then shown ₹3 in their UPI app. Both sides
+  /// now apply the same rule, and this is the one that reaches the mandate.
+  ///
+  /// The date-derived fallback stays for a user restored from a cache written before the field
+  /// existed, and for the first frame after a cold start with no network.
+  bool get trialAvailable =>
+      user?.trialAvailable ?? !(user?.hasEverSubscribed ?? false);
 
   SubscriptionState copyWith({
     SubscriptionOffer? offer,

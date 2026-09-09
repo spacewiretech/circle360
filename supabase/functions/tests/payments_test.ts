@@ -29,7 +29,7 @@ import {
   verifyWebhook,
   webhookSignature,
 } from "../_shared/cashfree.ts";
-import { isEntitled, isInTrial, UserRow } from "../_shared/entitlement.ts";
+import { hasUsedTrial, isEntitled, isInTrial, UserRow } from "../_shared/entitlement.ts";
 import {
   isFailedCharge,
   isResumable,
@@ -130,6 +130,46 @@ Deno.test("a garbled timestamp does not grant access", () => {
 // ---------------------------------------------------------------- webhooks
 
 const SECRET = "test_secret_key";
+
+// -------------------------------------------- trial eligibility
+
+/**
+ * The rule that decides which mandate `subscription-start` builds.
+ *
+ * It did not exist server-side at all: the ₹3 authorisation was unconditional, so a user who
+ * trialled, cancelled and came back read "Subscribe · ₹499/month" on the paywall and was then
+ * shown ₹3 in their UPI app. The client had this rule and never sent it; the server needed it
+ * and never had it.
+ */
+
+Deno.test("a fresh signup is still owed its trial", () => {
+  assertFalse(hasUsedTrial(user()));
+});
+
+Deno.test("a spent trial is not offered again, however the account ended", () => {
+  // The three ways back to the paywall: trial ran out, subscription lapsed, user cancelled.
+  const spent = { trial_ends_at: "2026-01-03T12:00:00.000Z", current_period_end: null };
+  assert(hasUsedTrial(spent));
+  assert(hasUsedTrial({ ...spent, current_period_end: "2026-02-01T12:00:00.000Z" }));
+
+  // And a paid period alone counts, for an account that somehow never had a trial date.
+  assert(hasUsedTrial({ trial_ends_at: null, current_period_end: "2026-02-01T12:00:00.000Z" }));
+});
+
+Deno.test("eligibility is a different question from entitlement", () => {
+  // The confusion that caused the bug: `isEntitled` was the only user-state check in
+  // `subscription-start`, and a lapsed subscriber is unentitled and trial-spent at once.
+  const lapsed = {
+    payment_type: "cancelled" as const,
+    trial_ends_at: "2026-01-03T12:00:00.000Z",
+    current_period_end: "2026-02-01T12:00:00.000Z",
+  };
+
+  assertFalse(isEntitled(lapsed, 12, NOW));
+  assert(hasUsedTrial(lapsed));
+});
+
+// -------------------------------------------- webhook signatures
 
 Deno.test("a correctly signed webhook verifies", async () => {
   const body = '{"type":"SUBSCRIPTION_STATUS_CHANGED","data":{}}';
@@ -449,6 +489,7 @@ Deno.test("a mandate cancelled from the UPI app revokes the account", () => {
     user({ payment_type: "trial" }),
     snapshot({ status: "CUSTOMER_CANCELLED" }),
     settings,
+    true,
   );
 
   assertEquals(updates.payment_type, "cancelled");
@@ -456,8 +497,13 @@ Deno.test("a mandate cancelled from the UPI app revokes the account", () => {
 });
 
 Deno.test("a merchant cancel and a customer cancel are treated the same", () => {
-  const merchant = userUpdatesFor(user(), snapshot({ status: "CANCELLED" }), settings);
-  const customer = userUpdatesFor(user(), snapshot({ status: "CUSTOMER_CANCELLED" }), settings);
+  const merchant = userUpdatesFor(user(), snapshot({ status: "CANCELLED" }), settings, true);
+  const customer = userUpdatesFor(
+    user(),
+    snapshot({ status: "CUSTOMER_CANCELLED" }),
+    settings,
+    true,
+  );
 
   assertEquals(merchant.payment_type, customer.payment_type);
   assertEquals(merchant.billing_state, customer.billing_state);
@@ -471,6 +517,7 @@ Deno.test("cancelling does not claw back time already paid for", () => {
     user({ payment_type: "active", current_period_end: paidTo }),
     snapshot({ status: "CUSTOMER_CANCELLED" }),
     settings,
+    true,
   );
 
   assertEquals(updates.current_period_end, undefined);
@@ -480,7 +527,12 @@ Deno.test("cancelling does not claw back time already paid for", () => {
 Deno.test("a mandate paused from the UPI app is marked, not revoked", () => {
   // Pausing is not cancelling: entitlement simply stops advancing. But it has to leave a trace,
   // or a stalled mandate looks perfectly healthy right up to the lockout.
-  const updates = userUpdatesFor(user(), snapshot({ status: "CUSTOMER_PAUSED" }), settings);
+  const updates = userUpdatesFor(
+    user(),
+    snapshot({ status: "CUSTOMER_PAUSED" }),
+    settings,
+    true,
+  );
 
   assertEquals(updates.billing_state, "paused");
   assertEquals(updates.payment_type, undefined);
@@ -488,21 +540,114 @@ Deno.test("a mandate paused from the UPI app is marked, not revoked", () => {
 
 Deno.test("an authorisation link that expired unused ends the account", () => {
   assertEquals(
-    userUpdatesFor(user(), snapshot({ status: "LINK_EXPIRED" }), settings).payment_type,
+    userUpdatesFor(user(), snapshot({ status: "LINK_EXPIRED" }), settings, true).payment_type,
     "expired",
   );
+});
+
+Deno.test("a first mandate still opens the trial and dates it from the capture", () => {
+  // The unchanged path, pinned so the returning-subscriber branch below cannot regress it.
+  const updates = userUpdatesFor(
+    user(),
+    snapshot({ status: "ACTIVE", authorizedAt: "2026-09-01T12:00:00.000Z" }),
+    settings,
+    true,
+  );
+
+  assertEquals(updates.trial_ends_at, "2026-09-03T12:00:00.000Z");
+  assertEquals(updates.current_period_end, undefined);
+  assertEquals(updates.trial_started_at, "2026-09-01T12:00:00.000Z");
 });
 
 Deno.test("re-authorising after a customer cancellation restores the account", () => {
   // The recovery path has to work from `cancelled` too, or a user who cancelled and changed
   // their mind pays again and stays locked out.
+  //
+  // The fixture is the whole point of this test and it used to be wrong: `trial_ends_at: null`
+  // cannot happen for a user who has cancelled — the trial clock is stamped when Cashfree
+  // captures the authorisation and is never cleared. With a realistic fixture the old code
+  // returned `payment_type: 'trial'` against a trial_ends_at eight months in the past, which
+  // `isEntitled` reads as false: the user paid and stayed locked out. They now get the
+  // no-trial mandate, and its full-price authorisation buys the month outright.
+  const authorizedAt = "2026-09-01T12:00:00.000Z";
   const updates = userUpdatesFor(
-    user({ payment_type: "cancelled" }),
-    snapshot({ status: "ACTIVE" }),
+    user({
+      payment_type: "cancelled",
+      trial_ends_at: "2026-01-03T12:00:00.000Z",
+      current_period_end: "2026-02-01T12:00:00.000Z",
+    }),
+    snapshot({ status: "ACTIVE", authorizationAmount: 499, authorizedAt }),
     settings,
+    false,
   );
 
-  assertEquals(updates.payment_type, "trial");
+  assertEquals(updates.payment_type, "active");
+  assertEquals(updates.current_period_end, "2026-10-01T12:00:00.000Z");
+
+  // And it is actually entitled, which is the only assertion that would have caught the bug.
+  assert(
+    isEntitled(
+      {
+        payment_type: "active",
+        trial_ends_at: "2026-01-03T12:00:00.000Z",
+        current_period_end: updates.current_period_end as string,
+      },
+      12,
+      new Date(authorizedAt),
+    ),
+  );
+});
+
+Deno.test("a no-trial mandate never hands out a second trial clock", () => {
+  // `trial_ends_at` is the record that the trial was spent. Rewriting it here would offer the
+  // ₹3 again on the next visit, which is the bug one layer up.
+  const updates = userUpdatesFor(
+    user({ payment_type: "expired", trial_ends_at: "2026-01-03T12:00:00.000Z" }),
+    snapshot({
+      status: "ACTIVE",
+      authorizationAmount: 499,
+      authorizedAt: "2026-09-01T12:00:00.000Z",
+    }),
+    settings,
+    false,
+  );
+
+  assertEquals(updates.trial_ends_at, undefined);
+  assertEquals(updates.trial_started_at, undefined);
+  assertEquals(updates.payment_type, "active");
+});
+
+Deno.test("replaying a no-trial authorisation does not buy a second month", () => {
+  // The reconcile sweep replays hourly and the webhook redelivers freely. `laterOf` is what
+  // makes both harmless; without it a returning subscriber would gain a month an hour.
+  const authorizedAt = "2026-09-01T12:00:00.000Z";
+  const replay = userUpdatesFor(
+    user({
+      payment_type: "active",
+      trial_ends_at: "2026-01-03T12:00:00.000Z",
+      current_period_end: "2026-10-01T12:00:00.000Z",
+    }),
+    snapshot({ status: "ACTIVE", authorizationAmount: 499, authorizedAt }),
+    settings,
+    false,
+  );
+
+  assertEquals(replay.current_period_end, "2026-10-01T12:00:00.000Z");
+});
+
+Deno.test("a no-trial mandate that is not yet authorised grants nothing", () => {
+  // ACTIVE with no authorisation time is a mandate Cashfree has accepted but not captured.
+  // Crediting a month there would hand out access for money that never moved.
+  const updates = userUpdatesFor(
+    user({ payment_type: "expired", trial_ends_at: "2026-01-03T12:00:00.000Z" }),
+    snapshot({ status: "ACTIVE", authorizationAmount: 499, authorizedAt: null }),
+    settings,
+    false,
+  );
+
+  assertEquals(updates.payment_type, undefined);
+  assertEquals(updates.current_period_end, undefined);
+  assertEquals(updates.active_subscription_id, "sub_1");
 });
 
 Deno.test("both spellings of cancelled name the same transition", () => {

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -5,6 +7,7 @@ import 'package:loc_360/app/assets.dart';
 
 import '../../app/router.dart';
 import '../../widgets/phone_field.dart';
+import '../subscription/promo_video_warmup.dart';
 import 'onboarding_viewmodel.dart';
 import 'widgets/onboarding_scaffold.dart';
 
@@ -28,6 +31,12 @@ class _PhoneViewState extends ConsumerState<PhoneView> {
     _controller.addListener(
       () => ref.read(onboardingViewModelProvider.notifier).setPhone(_controller.text),
     );
+
+    // The paywall is three screens away and its promo takes about nine seconds to reach a first
+    // frame, so it starts opening here instead — under the number field and the SMS wait, where
+    // nothing else is using the network. Not awaited and unable to throw: onboarding must never
+    // be held up, let alone broken, by a promo video.
+    unawaited(ref.read(promoVideoWarmupProvider).start());
   }
 
   @override

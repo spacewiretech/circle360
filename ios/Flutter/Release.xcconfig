@@ -1,2 +1,10 @@
 #include? "Pods/Target Support Files/Pods-Runner/Pods-Runner.release.xcconfig"
 #include "Generated.xcconfig"
+
+// Facebook Ads conversion reporting, substituted into Info.plist.
+//
+// Blank defaults first, then an optional include that overrides them — so a checkout without
+// Facebook.xcconfig still builds and simply reports nothing. See Facebook.xcconfig.example.
+FACEBOOK_APP_ID=
+FACEBOOK_CLIENT_TOKEN=
+#include? "Facebook.xcconfig"

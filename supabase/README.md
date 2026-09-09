@@ -62,9 +62,21 @@ a `-` in `fast2sms_otp_id` correctly reads as "no template" rather than being se
 
 ## Cashfree subscriptions
 
-₹3 authorises a UPI Autopay mandate and opens a 2-day trial; ₹499 is auto-debited on day 2 and
-monthly thereafter. Nothing about that is decided on the device — the app sends no amounts, no
-plan id and no status, only its session token.
+A UPI Autopay mandate, in one of two shapes depending on whether the account still has a trial:
+
+| | authorised now | first recurring debit |
+|---|---|---|
+| never subscribed | ₹3 (opens the 2-day trial) | day 2, then monthly |
+| trial already spent | ₹499 — this *is* the first month | a month out, then monthly |
+
+Eligibility is `trial_ends_at is not null or current_period_end is not null`, evaluated by
+`hasUsedTrial` in `_shared/entitlement.ts` and returned to the app as `trial_available`. It is
+deliberately a different question from `isEntitled`: a lapsed subscriber has no access *and* no
+trial left, and reading the first for the second is what once sold the ₹3 twice — the paywall
+quoted ₹499/month while the mandate carried ₹3, because the rule lived only on the device.
+
+Nothing about any of it is decided on the device — the app sends no amounts, no plan id and no
+status, only its session token.
 
 ### 1. Credentials and knobs — private `app_config` rows
 

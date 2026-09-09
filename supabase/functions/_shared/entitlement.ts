@@ -102,6 +102,23 @@ export function isEntitled(
   }
 }
 
+/**
+ * Whether this account has already consumed its trial.
+ *
+ * Deliberately *not* [isEntitled]. That answers "does this account have access right now", and a
+ * lapsed subscriber is unentitled and trial-spent at the same time — so reading the first for the
+ * second is exactly what let `subscription-start` sell the ₹3 trial twice: a user who trialled,
+ * cancelled and came back was shown ₹499/month and then handed a ₹3 mandate.
+ *
+ * Same rule as `AppUser.hasEverSubscribed` on the client, and now the authoritative copy of it:
+ * the paywall renders `trial_available` from [entitlementPayload] rather than deciding for itself.
+ */
+export function hasUsedTrial(
+  user: Pick<UserRow, "trial_ends_at" | "current_period_end">,
+): boolean {
+  return user.trial_ends_at !== null || user.current_period_end !== null;
+}
+
 /** True while the user is inside the paid-for trial, so the app can say so. */
 export function isInTrial(user: UserRow, graceHours: number, now: Date = new Date()): boolean {
   return user.payment_type === "trial" && isEntitled(user, graceHours, now);
@@ -127,6 +144,10 @@ export function entitlementPayload(
     current_period_end: user.current_period_end,
     entitled: isEntitled(user, graceHours, now),
     in_trial: isInTrial(user, graceHours, now),
+    // Which offer the paywall may show. Derived here rather than on the client for the same
+    // reason `entitled` is: the client had its own copy of this rule, the server had none at
+    // all, and the two disagreeing is what charged returning users a second ₹3.
+    trial_available: !hasUsedTrial(user),
     // Not an entitlement signal — the user is still fully in — but the app needs it to warn
     // them while there is still time to fix the mandate. Without it, an on-hold subscription is
     // invisible until the day access disappears.

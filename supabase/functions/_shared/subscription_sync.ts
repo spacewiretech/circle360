@@ -44,11 +44,17 @@ export interface SubscriptionRow {
   authorized_at: string | null;
   next_schedule_date: string | null;
   current_period_end?: string | null;
+  /**
+   * Which offer this mandate was opened on. Optional so a row read before the column existed
+   * still parses; callers treat a missing value as `true`, which is what every historical row was.
+   */
+  is_trial?: boolean | null;
+  authorization_amount?: number | null;
 }
 
 export const SUBSCRIPTION_COLUMNS =
   "id, user_id, subscription_id, cf_subscription_id, plan_id, status, session_id, " +
-  "session_expiry, authorized_at, next_schedule_date";
+  "session_expiry, authorized_at, next_schedule_date, is_trial, authorization_amount";
 
 /** See [asUserRow] — supabase-js cannot infer a row type from a non-literal select string. */
 export function asSubscriptionRow(row: unknown): SubscriptionRow {
@@ -72,11 +78,18 @@ function laterOf(a: string | null, b: string | null): string | null {
  * Only ever moves state forward. `trial_ends_at` is set once and never extended, so a
  * reconcile that runs twice cannot hand out a second trial; `current_period_end` only ever
  * takes the later of the two values, so a redelivered older payment cannot claw back access.
+ *
+ * [isTrialMandate] is the offer the mandate was opened on, from `subscriptions.is_trial`. It has
+ * to be told, not inferred: a returning subscriber authorises the full ₹499, and reading that as
+ * a trial authorisation is what left them debited and locked out — their `trial_ends_at` is
+ * already set and long past, so `payment_type = 'trial'` reads as unentitled the instant it is
+ * written, and no recurring debit is due for another month to correct it.
  */
 export function userUpdatesFor(
   user: UserRow,
   snapshot: SubscriptionSnapshot,
   settings: CashfreeSettings,
+  isTrialMandate: boolean,
 ): Record<string, unknown> {
   const updates: Record<string, unknown> = {};
 
@@ -84,7 +97,7 @@ export function userUpdatesFor(
   // most here come in customer- and merchant-initiated pairs — `CUSTOMER_CANCELLED` alongside
   // `CANCELLED` — and a switch is exactly what let one half of each pair fall through to
   // `default:` and leave a cancelled account fully entitled.
-  if (snapshot.status === "ACTIVE") {
+  if (snapshot.status === "ACTIVE" && isTrialMandate) {
     updates.active_subscription_id = snapshot.subscriptionId;
 
     // The trial clock starts at the instant Cashfree captured the ₹3, not at the instant we
@@ -106,6 +119,26 @@ export function userUpdatesFor(
         ? "active"
         : "trial";
     }
+  } else if (snapshot.status === "ACTIVE") {
+    updates.active_subscription_id = snapshot.subscriptionId;
+
+    // No trial on this mandate: the authorisation was the full monthly amount, so it *is* the
+    // first month and access starts now. Waiting for a RECURRING debit instead — which is what
+    // the trial branch above does — would lock the user out for the month they just paid for.
+    //
+    // `laterOf` keeps this idempotent, which matters because the same charge may arrive again
+    // through `reconcilePayments`: if it is read as RECURRING there, `updatesForRecurringSuccess`
+    // computes the same period end from the same instant and this collapses to one month.
+    if (snapshot.authorizedAt) {
+      updates.payment_type = "active";
+      updates.current_period_end = laterOf(
+        user.current_period_end,
+        addMonths(new Date(snapshot.authorizedAt), 1).toISOString(),
+      );
+    }
+
+    // `trial_ends_at` is deliberately untouched. It is the record that the trial was spent, and
+    // the only thing standing between this user and being offered ₹3 a third time.
   } else if (isCancelledStatus(snapshot.status)) {
     // Paid time is honoured: current_period_end is deliberately left alone so the user keeps
     // what they already paid for.
@@ -130,7 +163,11 @@ export function userUpdatesFor(
 
   // Dates worth having on the row rather than behind a join.
   if (snapshot.authorizedAt) {
-    updates.trial_started_at = user.trial_started_at ?? snapshot.authorizedAt;
+    // Only a trial mandate starts a trial. Stamping this from a full-price authorisation would
+    // date a trial the user never took, on the one account guaranteed not to have one.
+    if (isTrialMandate) {
+      updates.trial_started_at = user.trial_started_at ?? snapshot.authorizedAt;
+    }
     updates.subscription_started_at = user.subscription_started_at ?? snapshot.authorizedAt;
   }
   updates.next_billing_at = snapshot.nextScheduleDate;
@@ -582,7 +619,8 @@ export async function syncSubscription(
   if (userError || !userRow) throw new Error(`user read failed: ${userError?.message}`);
 
   const user = asUserRow(userRow);
-  const updates = userUpdatesFor(user, snapshot, settings);
+  // Defaulting to a trial mandate matches every row written before `is_trial` existed.
+  const updates = userUpdatesFor(user, snapshot, settings, row.is_trial ?? true);
 
   // Only when Cashfree disagrees with what we had. After the write above the two match, so the
   // hourly reconcile sweep replaying the same subscription emits nothing — the local row is the

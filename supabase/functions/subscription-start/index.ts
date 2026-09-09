@@ -1,5 +1,6 @@
 import {
   addDays,
+  addMonths,
   cancelSubscription,
   CashfreeError,
   cashfreeSettings,
@@ -13,6 +14,7 @@ import {
   asUserRow,
   entitlementPayload,
   graceHoursFrom,
+  hasUsedTrial,
   isEntitled,
   USER_COLUMNS,
 } from "../_shared/entitlement.ts";
@@ -24,11 +26,21 @@ import {
 } from "../_shared/subscription_sync.ts";
 
 /**
- * Opens a Cashfree UPI Autopay mandate: ₹3 now, then ₹499/month starting after the trial.
+ * Opens a Cashfree UPI Autopay mandate, in one of two shapes.
  *
- * The request body is empty by design. The plan, both amounts and the trial length all come
- * from `app_config`, so there is no parameter a modified client could send to pay less. The
- * only thing the caller supplies is its session token, and the user id is derived from that.
+ * A first-time subscriber gets the trial offer: ₹3 now, then ₹499/month starting after the trial
+ * days. Someone whose trial is already spent — lapsed, cancelled, or returning after either —
+ * gets the plain monthly plan: ₹499 now, then ₹499/month starting a month out.
+ *
+ * That second shape is the whole point of this branch. It used to not exist: the mandate was
+ * built one way for everybody, so a returning user read "Subscribe · ₹499/month" on the paywall,
+ * tapped it, and was shown a ₹3 debit in their UPI app. The paywall was right and the mandate was
+ * wrong, because trial eligibility lived only on the client and this function had no notion of it.
+ *
+ * The request body is still empty by design. The plan, both amounts and the trial length come
+ * from `app_config`, and eligibility comes from the caller's own `users` row — so there is no
+ * parameter a modified client could send to pay less. The only thing the caller supplies is its
+ * session token, and the user id is derived from that.
  */
 
 /** Cashfree allows alphanumerics, underscore, dot, hyphen and space, up to 250 characters. */
@@ -96,10 +108,20 @@ Deno.serve(async (req) => {
     return fail("invalid_request", "Please add your name before subscribing.", 400);
   }
 
+  // The one decision this function exists to make, and the one it never used to make at all.
+  // `isEntitled` above answers "does this account have access right now"; this answers "has this
+  // account already had its trial", and a lapsed subscriber is both unentitled and trial-spent.
+  const trialEligible = !hasUsedTrial(user);
+  const authorizationAmount = trialEligible ? settings.trialAmount : settings.recurringAmount;
+
   // Resume rather than duplicate: a double tap, or a checkout the user backgrounded and came
   // back to, must reuse the mandate it already opened.
+  //
+  // Only when it is the *same* offer, though. A trial-shaped session from before this branch
+  // existed — or from before a webhook moved the account — stays resumable for its full fifteen
+  // minutes, and handing it back would re-sell the ₹3 through the very path meant to stop it.
   const existing = await latestSubscription(db, userId);
-  if (existing && isResumable(existing)) {
+  if (existing && isResumable(existing) && (existing.is_trial ?? true) === trialEligible) {
     return json({
       status: "pending",
       subscription_id: existing.subscription_id,
@@ -131,7 +153,7 @@ Deno.serve(async (req) => {
   // A mandate that is still live at Cashfree while the user is not entitled is a mandate whose
   // debits are failing. It has to be cancelled *before* the replacement is created, not cleaned
   // up afterwards: leaving it would either trip the one-live-mandate index — losing the new
-  // mandate the user just paid ₹3 for, in favour of the broken one — or, worse, leave two UPI
+  // mandate the user just authorised, in favour of the broken one — or, worse, leave two UPI
   // mandates both authorised to take ₹499 a month.
   if (existing && ["ACTIVE", "ON_HOLD", "PAUSED"].includes(existing.status)) {
     try {
@@ -166,7 +188,12 @@ Deno.serve(async (req) => {
 
   const now = new Date();
   const subscriptionId = newSubscriptionId(userId);
-  const firstChargeTime = addDays(now, settings.trialDays);
+  // On the trial offer the first ₹499 lands when the trial runs out. Without it, the ₹499
+  // authorisation *is* the first month, so the next debit is a month away — anything sooner
+  // would bill twice for the same period.
+  const firstChargeTime = trialEligible
+    ? addDays(now, settings.trialDays)
+    : addMonths(now, 1);
   const sessionExpiry = new Date(now.getTime() + SESSION_MINUTES * 60 * 1000);
 
   // The local row is written first. If Cashfree then succeeds but our follow-up write fails,
@@ -179,7 +206,8 @@ Deno.serve(async (req) => {
       subscription_id: subscriptionId,
       plan_id: settings.planId,
       status: "INITIALIZED",
-      authorization_amount: settings.trialAmount,
+      is_trial: trialEligible,
+      authorization_amount: authorizationAmount,
       recurring_amount: settings.recurringAmount,
       first_charge_time: firstChargeTime.toISOString(),
       session_expiry: sessionExpiry.toISOString(),
@@ -199,6 +227,10 @@ Deno.serve(async (req) => {
       customerName: user.name.trim(),
       customerPhone: user.mobile_no,
       customerEmail: syntheticEmail(user.mobile_no),
+      authorizationAmount,
+      // Kept, never returned — on both offers the authorisation is money the user is paying for
+      // something, not a token debit to prove the mandate works.
+      authorizationRefund: false,
       firstChargeTime,
       sessionExpiry,
       // The SDK returns control through its own callback; this only matters for the web
@@ -249,9 +281,13 @@ Deno.serve(async (req) => {
     subscription_session_id: snapshot.sessionId,
     cf_subscription_id: snapshot.cfSubscriptionId,
     environment: settings.env,
-    // Display only. The amounts that are actually charged live in the Cashfree plan.
-    trial_amount: settings.trialAmount,
+    // What this mandate will actually do, not a copy of the config rows. These used to be
+    // labelled "display only" and to always quote the trial, which is precisely the gap the
+    // paywall fell into: it showed one offer while the mandate carried another.
+    is_trial: trialEligible,
+    authorization_amount: authorizationAmount,
     recurring_amount: settings.recurringAmount,
+    first_charge_at: firstChargeTime.toISOString(),
     trial_days: settings.trialDays,
   });
 });

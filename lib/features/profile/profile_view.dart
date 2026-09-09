@@ -11,6 +11,7 @@ import '../../data/fake/fake_session.dart';
 import '../../widgets/app_icon.dart';
 import '../../widgets/floating_pill.dart';
 import '../../widgets/map_background.dart';
+import '../auth/sign_out.dart';
 import 'profile_viewmodel.dart';
 
 /// Figma `12352:11678` — avatar straddling the sheet edge, three navigation rows.
@@ -65,21 +66,36 @@ class ProfileView extends ConsumerWidget {
                     child: Column(
                       children: [
                         _ProfileRow(
-                          icon: Svg.iconEdit,
+                          icon: const AppIcon(Svg.iconEdit, size: 24),
                           label: 'Edit Your Details',
                           onTap: () => _todo(context, 'Edit Your Details'),
                         ),
                         const SizedBox(height: 9),
                         _ProfileRow(
-                          icon: Svg.iconFamily,
+                          icon: const AppIcon(Svg.iconFamily, size: 24),
                           label: 'My family',
                           onTap: () => context.pop(),
                         ),
                         const SizedBox(height: 9),
                         _ProfileRow(
-                          icon: Svg.iconSettings,
+                          icon: const AppIcon(Svg.iconSettings, size: 24),
                           label: 'Settings',
                           onTap: () => context.push(Routes.settings),
+                        ),
+                        const SizedBox(height: 9),
+                        // The only way out of the app, and the only red in it outside the
+                        // payment screens — a row that ends the session should not look like
+                        // three rows that merely navigate.
+                        _ProfileRow(
+                          icon: const Icon(
+                            Icons.logout,
+                            size: 24,
+                            color: AppColors.danger,
+                          ),
+                          label: 'Log out',
+                          tint: AppColors.danger,
+                          showChevron: false,
+                          onTap: () => confirmSignOut(context, ref, source: 'profile'),
                         ),
                       ],
                     ),
@@ -179,11 +195,25 @@ class _EditableAvatar extends StatelessWidget {
 
 /// One 54pt navigation row: icon, label, chevron.
 class _ProfileRow extends StatelessWidget {
-  const _ProfileRow({required this.icon, required this.label, required this.onTap});
+  const _ProfileRow({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+    this.tint,
+    this.showChevron = true,
+  });
 
-  final String icon;
+  /// A widget rather than an SVG asset path: every row in the Figma set has an export, but the
+  /// sign-out row does not, and a Material glyph is better than inventing one.
+  final Widget icon;
   final String label;
   final VoidCallback onTap;
+
+  /// Recolours the label. Only sign-out sets it — see [AppColors.danger].
+  final Color? tint;
+
+  /// A chevron promises forward navigation, which sign-out does not offer.
+  final bool showChevron;
 
   @override
   Widget build(BuildContext context) {
@@ -198,11 +228,19 @@ class _ProfileRow extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 15),
           child: Row(
             children: [
-              AppIcon(icon, size: 24),
+              icon,
               const SizedBox(width: 10),
-              Expanded(child: Text(label, style: AppText.rowLabel)),
+              Expanded(
+                child: Text(
+                  label,
+                  style: tint == null
+                      ? AppText.rowLabel
+                      : AppText.rowLabel.copyWith(color: tint),
+                ),
+              ),
               // The design reuses the down chevron rotated a quarter turn.
-              const RotatedBox(quarterTurns: 3, child: AppIcon(Svg.chevron, size: 24)),
+              if (showChevron)
+                const RotatedBox(quarterTurns: 3, child: AppIcon(Svg.chevron, size: 24)),
             ],
           ),
         ),

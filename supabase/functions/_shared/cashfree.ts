@@ -6,7 +6,9 @@
  * we trust to move money state — a leaked secret would let anyone forge a "payment succeeded".
  *
  * Amounts and the plan id are read from app_config, never from a request body. A client that
- * can name its own price is a client that pays ₹1.
+ * can name its own price is a client that pays ₹1. [CreateSubscriptionInput.authorizationAmount]
+ * is not an exception: it is chosen by `subscription-start` from those same config rows and the
+ * caller's own `users` row, and no part of it comes off the wire.
  */
 
 import { AppConfig, configSetting } from "./config.ts";
@@ -219,6 +221,17 @@ export interface CreateSubscriptionInput {
   customerName: string;
   customerPhone: string;
   customerEmail: string;
+  /**
+   * What the user is debited to authorise the mandate: the ₹3 trial fee, or the full recurring
+   * amount for someone whose trial is already spent.
+   *
+   * Passed in rather than read from settings here, because only the caller knows the user. It is
+   * still never a request parameter — `subscription-start` derives it from `app_config` and the
+   * user's own row, so there remains no path by which a modified client can name its own price.
+   */
+  authorizationAmount: number;
+  /** False keeps the authorisation as a real charge; true makes it a token debit Cashfree returns. */
+  authorizationRefund: boolean;
   firstChargeTime: Date;
   sessionExpiry: Date;
   returnUrl: string;
@@ -243,15 +256,17 @@ export function createSubscription(
       // path by which a request body can change what a subscriber is billed.
       plan_details: { plan_id: settings.planId },
       authorization_details: {
-        authorization_amount: settings.trialAmount,
-        // False is what turns the authorisation into a kept trial fee. Left true, Cashfree
-        // refunds it automatically and the ₹3 the user was promised would silently come back.
-        authorization_amount_refund: false,
+        authorization_amount: input.authorizationAmount,
+        // False is what turns the authorisation into a kept charge. Left true, Cashfree refunds
+        // it automatically and the amount the user was quoted would silently come back.
+        authorization_amount_refund: input.authorizationRefund,
+        // No `upi` block on purpose. Pinning `{upi_type: "intent", upi_app: "googlepay"}` here
+        // created every mandate for Google Pay, while the paywall lets the user pick their app
+        // and the SDK launches the one they chose — `openWithApp` passes it as the UPI id at
+        // payment time, independently of this body. A user who picked PhonePe got a Google Pay
+        // mandate. Omitting it lets the SDK's choice stand, and leaves the checkout-screen
+        // fallback free to offer the collect flow.
         payment_methods: ["upi"],
-        upi: {
-        upi_type: "intent",
-        upi_app: "googlepay"
-        }
       },
       subscription_first_charge_time: toIstIso(input.firstChargeTime),
       // Far enough out that the mandate never lapses on its own; cancellation is explicit.

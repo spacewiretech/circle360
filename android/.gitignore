@@ -12,3 +12,7 @@ GeneratedPluginRegistrant.java
 key.properties
 **/*.keystore
 **/*.jks
+
+# Facebook App ID and Client Token. Public values, but per-environment — see
+# facebook.properties.example, which is committed and documents both.
+facebook.properties

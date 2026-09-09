@@ -6,6 +6,7 @@ import '../app/env.dart';
 import '../location_service.dart';
 import 'analytics/analytics.dart';
 import 'analytics/analytics_events.dart';
+import 'analytics/facebook_analytics.dart';
 import 'analytics/mixpanel_analytics.dart';
 import 'cashfree/cashfree_checkout.dart';
 import 'cashfree/upi_app_preference.dart';
@@ -61,24 +62,35 @@ final appConfigProvider = FutureProvider<Map<String, String>>(
 /// global holder, so the two can never disagree about which sink is live.
 final analyticsProvider = Provider<Analytics>((ref) => const NoopAnalytics());
 
-/// Starts Mixpanel once the fetched config arrives, and stamps the environment onto every event.
+/// Starts the analytics sinks once the fetched config arrives, and stamps the environment onto
+/// every event.
 ///
 /// Watched by [Loc360App] so it runs for the life of the app. It is a no-op whenever boot already
-/// started Mixpanel from the cached config — which is every launch after the first — but it is
-/// what covers the first launch on a device, and it is also [appConfigProvider]'s first real
+/// started them from the cached config — which is every launch after the first — but it is what
+/// covers the first launch on a device, and it is also [appConfigProvider]'s first real
 /// consumer: nothing read that provider before this.
 final analyticsBootstrapProvider = FutureProvider<void>((ref) async {
   final config = await ref.watch(appConfigProvider.future);
 
-  ref.read(analyticsProvider).registerSuper({
+  final analytics = ref.read(analyticsProvider);
+  analytics.registerSuper({
     P.env: config.configString('env'),
     P.backendMode: backendMode,
   });
 
-  final analytics = ref.read(analyticsProvider);
-  if (analytics is MixpanelAnalytics) {
-    await analytics.start(config[mixpanelTokenKey]);
-  }
+  // Resolved through [analyticsSink] rather than a direct `is` test, because the installed sink
+  // is a [MultiAnalytics] fan-out and a plain `analytics is MixpanelAnalytics` would now be false
+  // — silently leaving Mixpanel unstarted on exactly the first launch this provider exists to
+  // cover. The helper looks inside the fan-out, and still copes with a bare sink in tests.
+  final mixpanel = analyticsSink<MixpanelAnalytics>(analytics);
+  if (mixpanel != null) await mixpanel.start(config[mixpanelTokenKey]);
+
+  // Note the propagation delay the day `facebook_app_id` first appears in `app_config`: an
+  // install whose six-hour cache predates the row is served that cache without a fetch, so it
+  // reports nothing until the cache ages out. One-time, and only on already-installed devices —
+  // a fresh install fetches and starts reporting immediately.
+  final facebook = analyticsSink<FacebookAnalytics>(analytics);
+  if (facebook != null) await startFacebook(facebook, config);
 });
 
 /// Which rung of the repository ladder below is live.

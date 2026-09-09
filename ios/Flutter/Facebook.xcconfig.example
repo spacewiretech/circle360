@@ -1,0 +1,23 @@
+// Facebook Ads conversion reporting.
+//
+// Copy to `Facebook.xcconfig` (gitignored) and fill both values in. Leave the copy absent, or
+// either value blank, and the SDK comes up with no app id and reports nothing — the correct
+// state for a checkout that is not pointed at a Facebook app.
+//
+// Neither value is a secret. Both ship inside every installed app by design; they are kept out
+// of git because they are per-environment, not because they are sensitive.
+//
+// The Facebook **app secret** does not belong here, or anywhere else in this repo. It is a
+// server-side Conversions API credential, and this app has no Conversions API.
+//
+// Both values live in the Meta App Dashboard at developers.facebook.com, not in Events Manager:
+//
+//   FACEBOOK_APP_ID       Apps -> [your app] -> Settings -> Basic -> App ID
+//   FACEBOOK_CLIENT_TOKEN Apps -> [your app] -> Settings -> Advanced -> Security -> Client token
+//
+// The client token is not optional — both native SDKs refuse to initialise without one.
+//
+// These must match android/facebook.properties — one Facebook app, two platforms.
+
+FACEBOOK_APP_ID=
+FACEBOOK_CLIENT_TOKEN=

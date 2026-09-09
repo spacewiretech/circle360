@@ -1,4 +1,4 @@
-import 'package:flutter/widgets.dart' show VoidCallback;
+import 'package:flutter/widgets.dart' show VoidCallback, debugPrint;
 
 import '../models/app_user.dart';
 import 'analytics_events.dart';
@@ -70,6 +70,87 @@ class NoopAnalytics implements Analytics {
   @override
   void flush() {}
 }
+
+/// Fans every call out to several backends at once.
+///
+/// Added when the app started reporting conversions to Facebook Ads. Mixpanel and Facebook want
+/// very different amounts of traffic — Mixpanel answers product questions and needs everything,
+/// Facebook trains an ad optimiser and needs four events — but that is a difference between
+/// *sinks*, not between call sites. Putting the fan-out here keeps every ViewModel writing one
+/// `track` call, and lets each sink decide for itself what it cares about: [MixpanelAnalytics]
+/// keeps the lot, `FacebookAnalytics` drops all but the conversions.
+///
+/// Firebase Analytics is deliberately not one of these. It is attached to the router as a
+/// `FirebaseAnalyticsObserver` and is only ever wanted for the automatic events Google Ads and
+/// Play Console read; routing the hand-curated funnel into it as well would mean maintaining a
+/// third event vocabulary for no question anyone is asking.
+///
+/// Each sink is called inside its own guard. The [Analytics] contract already forbids throwing,
+/// but a third-party SDK's failure modes are not ours to predict, and one misbehaving vendor must
+/// not cost the other its event.
+class MultiAnalytics implements Analytics {
+  MultiAnalytics(this.sinks);
+
+  final List<Analytics> sinks;
+
+  /// The first sink of type [T], or null if none is installed.
+  ///
+  /// Both the boot sequence and `analyticsBootstrapProvider` have to hand a *concrete*
+  /// implementation its credentials once `app_config` resolves, and neither should have to know
+  /// the shape of the fan-out to find it. Prefer the [analyticsSink] helper, which also copes
+  /// with a bare, unwrapped sink.
+  T? sink<T extends Analytics>() {
+    for (final sink in sinks) {
+      if (sink is T) return sink;
+    }
+    return null;
+  }
+
+  void _each(String method, void Function(Analytics) action) {
+    for (final sink in sinks) {
+      try {
+        action(sink);
+      } catch (error) {
+        debugPrint('[analytics] ${sink.runtimeType}.$method threw: $error');
+      }
+    }
+  }
+
+  @override
+  void track(String event, [Map<String, Object?> properties = const {}]) =>
+      _each('track', (sink) => sink.track(event, properties));
+
+  @override
+  void timeEvent(String event) => _each('timeEvent', (sink) => sink.timeEvent(event));
+
+  @override
+  void identify(AppUser user) => _each('identify', (sink) => sink.identify(user));
+
+  @override
+  void reset() => _each('reset', (sink) => sink.reset());
+
+  @override
+  void registerSuper(Map<String, Object?> properties) =>
+      _each('registerSuper', (sink) => sink.registerSuper(properties));
+
+  @override
+  void trackCharge(double amount, [Map<String, Object?> properties = const {}]) =>
+      _each('trackCharge', (sink) => sink.trackCharge(amount, properties));
+
+  @override
+  void flush() => _each('flush', (sink) => sink.flush());
+}
+
+/// Finds the [T] behind whatever is installed, wrapped in a [MultiAnalytics] or not.
+///
+/// Callers that need a concrete implementation — to start it, or to hand it a token — get null
+/// rather than a cast error when analytics is off, which is the normal state in tests and in any
+/// build that never ran `bootMobileApp`.
+T? analyticsSink<T extends Analytics>(Analytics analytics) => switch (analytics) {
+      MultiAnalytics() => analytics.sink<T>(),
+      final T typed => typed,
+      _ => null,
+    };
 
 Analytics _instance = const NoopAnalytics();
 

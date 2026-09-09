@@ -29,6 +29,16 @@ abstract final class Ev {
   static const errorShown = 'Error Shown';
   static const deepLinkOpened = 'Deep Link Opened';
 
+  // --- Ad attribution ------------------------------------------------------
+
+  /// The answer to the iOS App Tracking Transparency prompt, whether it was just given or was
+  /// already standing from an earlier launch.
+  ///
+  /// The opt-in rate this measures is the ceiling on how much iOS ad spend Facebook can attribute
+  /// at all. A drop in it and a drop in real conversions look identical from inside the ad
+  /// account, and this is the only thing that tells them apart.
+  static const trackingConsentResolved = 'Tracking Consent Resolved';
+
   // --- Splash --------------------------------------------------------------
   static const splashResolved = 'Splash Resolved';
 
@@ -48,12 +58,29 @@ abstract final class Ev {
   static const nameSubmitted = 'Name Submitted';
   static const nameSaveFailed = 'Name Save Failed';
   static const signupCompleted = 'Signup Completed';
+
+  /// The confirmation dialog opened. Paired with [signedOut] and [signOutCancelled] so the
+  /// confirm step has a measurable drop-off rather than being invisible — without it, a user who
+  /// opens the dialog and backs out is indistinguishable from one who never tapped at all.
+  static const signOutRequested = 'Sign Out Requested';
+  static const signOutCancelled = 'Sign Out Cancelled';
+
+  /// Carries `source` (`profile` or `settings`) — the app offers sign-out in two places and it is
+  /// worth knowing which one people actually find.
   static const signedOut = 'Signed Out';
 
   // --- Paywall -------------------------------------------------------------
   static const paywallViewed = 'Paywall Viewed';
   static const paywallOfferLoaded = 'Paywall Offer Loaded';
   static const paywallOfferLoadFailed = 'Paywall Offer Load Failed';
+
+  /// The promo above the sheet could not be played.
+  ///
+  /// Same argument as [paywallOfferLoadFailed]: the user sees a tasteful gradient and the app
+  /// carries on selling, so a dead URL is invisible from every angle except a conversion number
+  /// that quietly moved. The URL is operator-editable, which means it will eventually be edited
+  /// wrong, and nobody would think to look at a config row for it.
+  static const paywallVideoFailed = 'Paywall Video Failed';
 
   // --- UPI app selection ---------------------------------------------------
   static const upiAppsDiscovered = 'UPI Apps Discovered';
@@ -262,6 +289,16 @@ abstract final class P {
   static const isExistingUser = 'is_existing_user';
   static const inviterName = 'inviter_name';
   static const linkType = 'link_type';
+
+  // --- Ad attribution ------------------------------------------------------
+
+  /// The raw ATT authorisation status — `authorized`, `denied`, `restricted`, `notDetermined`.
+  static const status = 'status';
+  static const granted = 'granted';
+
+  /// False when the status was already settled on a previous launch, so the opt-in *rate* can be
+  /// measured over the users who were actually asked rather than over every launch.
+  static const prompted = 'prompted';
 }
 
 /// Values for [P.exitType] — how a screen stopped being the one on top.

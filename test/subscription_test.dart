@@ -170,6 +170,34 @@ void main() {
       final user = base.copyWith(trialEndsAt: now.subtract(const Duration(days: 40)));
       expect(user.hasEverSubscribed, isTrue);
     });
+
+    test('the server decides, because it is the one that builds the mandate', () {
+      // This screen used to own the rule outright and never send it, so `subscription-start`
+      // opened a ₹3 mandate for everybody: the paywall said ₹499/month and the UPI app said ₹3.
+      // Both now read the same answer, and this is the copy that reaches the mandate.
+      final user = AppUser.fromServer(const {
+        'user_id': 'u',
+        'mobile_no': '9931145610',
+        'trial_available': false,
+      });
+
+      expect(user!.trialAvailable, isFalse);
+      expect(
+        SubscriptionState(user: user).trialAvailable,
+        isFalse,
+        reason: 'the server said the trial is spent',
+      );
+    });
+
+    test('a payload without the field falls back to the dates', () {
+      // A user restored from a cache written before `trial_available` existed. Defaulting the
+      // field to true here would re-offer the ₹3 to exactly the accounts that already used it.
+      final spent = base.copyWith(trialEndsAt: now.subtract(const Duration(days: 40)));
+
+      expect(spent.trialAvailable, isNull);
+      expect(SubscriptionState(user: spent).trialAvailable, isFalse);
+      expect(const SubscriptionState(user: null).trialAvailable, isTrue);
+    });
   });
 
   group('routing', () {

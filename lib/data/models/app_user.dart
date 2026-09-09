@@ -75,6 +75,7 @@ class AppUser {
     this.currentPeriodEnd,
     this.entitled = false,
     this.billingState,
+    this.trialAvailable,
   });
 
   final String id;
@@ -113,7 +114,18 @@ class AppUser {
   /// from someone whose trial lapsed.
   bool get inTrial => paymentType == PaymentType.trial && entitled;
 
+  /// Whether the server says the ₹3 offer still applies, or null for a payload written before
+  /// it said so — a user restored from the cache by an older build.
+  ///
+  /// The same rule as [hasEverSubscribed], but computed where the mandate is actually built.
+  /// Keeping the client's own copy as the authority is what let the paywall quote ₹499/month
+  /// while `subscription-start` opened a ₹3 mandate: the two never had to agree, and did not.
+  final bool? trialAvailable;
+
   /// False only for an account that has never authorised a mandate — the ₹3 offer applies.
+  ///
+  /// Still derived here because it has to work offline, where there is no server to ask.
+  /// Prefer [trialAvailable] whenever it is set.
   bool get hasEverSubscribed => trialEndsAt != null || currentPeriodEnd != null;
 
   /// The instant access lapses if nothing else changes, before any grace.
@@ -172,6 +184,11 @@ class AppUser {
       currentPeriodEnd: _parseDate(raw['current_period_end']),
       entitled: raw['entitled'] == true,
       billingState: BillingState.parse(raw['billing_state']),
+      // Left null rather than defaulted, so a response from a build that predates the field
+      // falls back to the date-derived rule instead of silently re-offering the trial.
+      trialAvailable: raw['trial_available'] is bool
+          ? raw['trial_available'] as bool
+          : null,
     );
   }
 
@@ -189,6 +206,7 @@ class AppUser {
     DateTime? currentPeriodEnd,
     bool? entitled,
     BillingState? billingState,
+    bool? trialAvailable,
     /// Explicit, because null is a meaningful value here — it means the mandate recovered.
     bool clearBillingState = false,
   }) {
@@ -204,6 +222,7 @@ class AppUser {
       entitled: entitled ?? this.entitled,
       billingState:
           clearBillingState ? null : (billingState ?? this.billingState),
+      trialAvailable: trialAvailable ?? this.trialAvailable,
     );
   }
 }

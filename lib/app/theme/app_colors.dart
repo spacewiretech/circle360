@@ -30,8 +30,9 @@ abstract final class AppColors {
   /// "Online" dot on avatars, and the tick on the payment-success screen.
   static const presence = Color(0xFF07B819);
 
-  /// Payment outcome accents. Only the status screens use these — a failed charge is the one
-  /// place in the app that earns a red, and it must not be mistaken for the brand blue.
+  /// Payment outcome accents, and the two places that earn a red: a failed charge on the status
+  /// screens, and the sign-out row on the profile sheet. Both end something. Nothing else should
+  /// use these — a red that means "ordinary action" would be mistaken for the brand blue.
   static const danger = Color(0xFFFA2600);
   static const warning = Color(0xFFFFC800);
 

@@ -1,0 +1,40 @@
+# Facebook Ads conversion reporting.
+#
+# Copy to `facebook.properties` (gitignored) and fill both values in. Leave the copy absent, or
+# either value blank, and the Facebook SDK is never initialised — the app runs exactly as it did
+# before the integration existed. That is the correct state for a checkout that is not pointed at
+# a Facebook app.
+#
+# One expected symptom of that unconfigured state, so it is not mistaken for a bug: logcat shows
+#
+#   E GeneratedPluginRegistrant: Error registering plugin facebook_app_events
+#   The SDK has not been initialized, make sure to call FacebookSdk.sdkInitialize() first.
+#
+# once at launch. The plugin builds an AppEventsLogger when it attaches to the engine, and there
+# is no initialised SDK for it to build one from. Flutter catches it per-plugin, the app carries
+# on normally, and the Dart side is gated separately on `facebook_app_id` in app_config so nothing
+# tries to call the missing channel. Filling in the two values below removes it.
+#
+# The alternative — initialising the SDK with a blank app id — is worse: the SDK comes up and then
+# hammers Facebook's Graph API with OAuthException 400s on every launch.
+#
+# Neither of these is a secret. Both ship inside every installed app by design, and Facebook
+# treats them as public. They are kept out of git because they are per-environment, not because
+# they are sensitive.
+#
+# The Facebook **app secret** does not belong here, or anywhere else in this repo. It is a
+# server-side Conversions API credential; the client SDK has no use for it and never asks for it.
+#
+# Both values live in the Meta App Dashboard at developers.facebook.com, not in Events Manager:
+#
+#   appId       Apps -> [your app] -> Settings -> Basic -> App ID
+#   clientToken Apps -> [your app] -> Settings -> Advanced -> Security -> Client token
+#
+# The client token is not optional. facebook-core enforces it at init:
+#   "A valid Facebook client token must be set in the AndroidManifest.xml or set by calling
+#    FacebookSdk.setClientToken before initializing the sdk."
+#
+# Must match ios/Flutter/Facebook.xcconfig — one Facebook app, two platforms.
+
+appId=
+clientToken=

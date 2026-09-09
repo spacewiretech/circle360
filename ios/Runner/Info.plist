@@ -92,6 +92,53 @@
 				<string>loc360</string>
 			</array>
 		</dict>
+		<!-- Facebook's own scheme, fb<APP_ID>. A separate URL type rather than another entry in
+		     the array above, so the Cashfree return_url and the Facebook callback cannot be
+		     mistaken for one another. -->
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLName</key>
+			<string>com.spacewire.circle360.facebook</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>fb$(FACEBOOK_APP_ID)</string>
+			</array>
+		</dict>
+	</array>
+	<!-- Facebook Ads conversion reporting.
+
+	     Substituted at build time from ios/Flutter/Facebook.xcconfig, which is gitignored and
+	     documented by Facebook.xcconfig.example beside it. Debug.xcconfig and Release.xcconfig
+	     define blank defaults before optionally including it, so a checkout without that file
+	     still builds — the SDK simply comes up with no app id and reports nothing.
+
+	     Neither value is a secret: both ship inside every installed app by design. The Facebook
+	     **app secret** is not here, and is not used by this app anywhere. -->
+	<key>FacebookAppID</key>
+	<string>$(FACEBOOK_APP_ID)</string>
+	<key>FacebookClientToken</key>
+	<string>$(FACEBOOK_CLIENT_TOKEN)</string>
+	<key>FacebookDisplayName</key>
+	<string>Circle 360</string>
+	<!-- Why the app asks to track, shown verbatim inside Apple's own dialog. Names the benefit
+	     rather than the mechanism: "allow tracking" means nothing to the person reading it, and a
+	     vague reason is the most reliable way to be denied. -->
+	<key>NSUserTrackingUsageDescription</key>
+	<string>Allow tracking so we can tell which ads bring families to Circle 360, and stop paying for the ones that don't. It does not change what you or your circle can see.</string>
+	<!-- Facebook's SKAdNetwork identifiers. Apple's install-attribution channel, and the only one
+	     left when a user declines the prompt above — which most do. Without these the campaign is
+	     unattributable for that majority. -->
+	<key>SKAdNetworkItems</key>
+	<array>
+		<dict>
+			<key>SKAdNetworkIdentifier</key>
+			<string>v9wttpbfk9.skadnetwork</string>
+		</dict>
+		<dict>
+			<key>SKAdNetworkIdentifier</key>
+			<string>n38lu8286q.skadnetwork</string>
+		</dict>
 	</array>
 	<!-- The UPI apps Cashfree's SDK probes for. iOS refuses canOpenURL for any scheme not
 	     listed here, so a missing entry does not error — the app simply never appears in our
@@ -111,6 +158,12 @@
 		<string>mobikwik</string>
 		<string>credpay</string>
 		<string>upi</string>
+		<!-- Appended for the Facebook SDK, which probes these to decide whether it can hand off
+		     to an installed Facebook or Messenger app. The UPI schemes above are load-bearing for
+		     Cashfree's installed-app detection — this list is added to, never replaced. -->
+		<string>fbapi</string>
+		<string>fb-messenger-share-api</string>
+		<string>fbauth2</string>
 	</array>
 	<!-- Off on purpose: the URL must reach app_links and the splash, which decides whether to
 	     show the invite screen. Left on, the platform hands the URL straight to GoRouter and

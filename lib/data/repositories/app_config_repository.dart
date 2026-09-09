@@ -14,6 +14,20 @@ abstract interface class AppConfigRepository {
 /// whichever project the constant named.
 const mixpanelTokenKey = 'mixpanel_token';
 
+/// The Facebook app the SDK reports conversions to, and the switch that silences it.
+///
+/// Unlike [mixpanelTokenKey] these are not the values the SDK initialises from — both native SDKs
+/// read the App ID and Client Token out of the manifest and plist at process start, before Dart
+/// runs. They are here so that reporting can be switched off, or pointed at a different Facebook
+/// app during a campaign migration, without shipping a release. A blank [facebookAppIdKey] or a
+/// false [facebookEnabledKey] leaves the sink dormant.
+///
+/// The Facebook **app secret** is deliberately absent, here and everywhere else in this repo. It
+/// is a server-side Conversions API credential, the client SDK has no use for it, and
+/// `app_config_secrets_stay_private` would refuse to publish it in any case.
+const facebookAppIdKey = 'facebook_app_id';
+const facebookEnabledKey = 'facebook_events_enabled';
+
 /// Values the app falls back to when config has never been fetched and there is no network.
 ///
 /// A cold start must never block on the network, so these have to be good enough to run on.
@@ -29,6 +43,21 @@ const defaultAppConfig = <String, String>{
   'trial_price_label': '₹3',
   'plan_price_label': '₹499',
   'cashfree_trial_days': '2',
+  // The same two prices as numbers, for the ad networks. Facebook's Purchase event bids against
+  // a value and a currency code, and neither can be had from the labels above without parsing a
+  // rupee sign off marketing copy — which breaks the first time a label reads '₹3 only' or the
+  // app is sold outside India.
+  //
+  // Still not authoritative for billing: what is actually charged comes from the Cashfree plan.
+  // A wrong number here misreports ROAS to Facebook; it cannot take anybody's money.
+  'trial_price_amount': '3',
+  'plan_price_amount': '499',
+  'currency_code': 'INR',
+  // Blank by design, exactly as [mixpanelTokenKey] is absent by design: no app id means the
+  // Facebook sink never starts, which is correct for any build not pointed at a Facebook app.
+  // The real value is served from `app_config` — see 20260909010000_facebook.sql.
+  facebookAppIdKey: '',
+  facebookEnabledKey: 'true',
 };
 
 /// Typed reads over the raw key/value map, so a bad or missing value can never crash a screen.
@@ -42,4 +71,9 @@ extension AppConfigValues on Map<String, String> {
       0;
 
   bool configFlag(String key) => configString(key).toLowerCase() == 'true';
+
+  double configDouble(String key) =>
+      double.tryParse(configString(key)) ??
+      double.tryParse(defaultAppConfig[key] ?? '') ??
+      0;
 }

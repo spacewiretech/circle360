@@ -1,6 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../app/router.dart';
 import '../../app/theme/app_colors.dart';
@@ -8,6 +11,8 @@ import '../../app/theme/app_theme.dart';
 import '../../app/theme/app_typography.dart';
 import '../../data/analytics/analytics.dart';
 import '../../data/analytics/analytics_events.dart';
+import '../../data/analytics/att_consent.dart';
+import '../../app/env.dart';
 import '../../data/fake/fake_session.dart';
 import '../../data/models/subscription_offer.dart';
 import '../../data/models/upi_app.dart';
@@ -16,6 +21,8 @@ import '../../widgets/map_background.dart';
 import '../../widgets/primary_button.dart';
 import '../../widgets/sheet_surface.dart';
 import '../../widgets/terms_footer.dart';
+import 'promo_video.dart';
+import 'promo_video_warmup.dart';
 import 'subscription_viewmodel.dart';
 
 /// Figma `12310:11295` — the Location History paywall, now backed by Cashfree UPI Autopay.
@@ -30,9 +37,59 @@ class SubscriptionView extends ConsumerStatefulWidget {
 }
 
 class _SubscriptionViewState extends ConsumerState<SubscriptionView> {
+  /// The promo starts with sound on, and this is where turning it off is remembered.
+  ///
+  /// Local to the screen rather than to the ViewModel on purpose: a speaker icon is not part of a
+  /// payment machine, and `subscriptionViewModelProvider` is deliberately not autoDispose — a
+  /// choice made here would otherwise outlive the screen, the payment, and the session.
+  bool _muted = false;
+
+  /// `app_config.paywall_video_url`, empty until it arrives and empty forever if it never does.
+  String _videoUrl = '';
+
+  /// Read as its own one-row query rather than through `appConfigProvider`.
+  ///
+  /// That map is served from a six-hour SharedPreferences cache, which is right for prices and
+  /// limits and wrong for this: a URL pasted into the dashboard would not reach a device that had
+  /// launched in the meantime until the cache aged out, and the paywall would sit there showing
+  /// no video with nothing visibly wrong. One row, no cache, no waiting.
+  ///
+  /// Only reached when [PromoVideoWarmup] has no answer: every user who came through onboarding
+  /// has had this row for a minute already. What is left is the paths that skip onboarding
+  /// entirely — a lapsed user routed here by the splash, an eviction by `EntitlementGate`, the
+  /// retry button on a failed payment — and for those this is exactly the code it always was.
+  Future<void> _loadVideoUrl() async {
+    if (!Env.hasSupabase) return;
+    try {
+      final row = await Supabase.instance.client
+          .from('app_config')
+          .select('value')
+          .eq('key', 'paywall_video_url')
+          .maybeSingle()
+          .timeout(const Duration(seconds: 8));
+
+      if (!mounted) return;
+      setState(() => _videoUrl = (row?['value'] as String?)?.trim() ?? '');
+    } catch (error) {
+      // The paywall's job is to take money, and it can do that with no promo at all.
+      debugPrint('[paywall] could not read paywall_video_url: $error');
+    }
+  }
+
   @override
   void initState() {
     super.initState();
+
+    // Synchronously, before the first build, and that is the whole point: with the URL already in
+    // hand the card is laid out at its real height in frame one. Waiting on the query instead is
+    // what used to make the promo appear out of nothing and shove the sheet down behind it —
+    // `PromoVideo` renders no card at all until it has a usable URL.
+    final warmUrl = ref.read(promoVideoWarmupProvider).url;
+    if (warmUrl != null) {
+      _videoUrl = warmUrl;
+    } else {
+      unawaited(_loadVideoUrl());
+    }
     // Stateful purely for this. `Paywall Offer Loaded` cannot stand in as the view event: the
     // ViewModel is not autoDispose, so `_load` runs once for the life of the app and a user sent
     // back here by a failed payment or a lapsed trial would never be counted a second time.
@@ -48,6 +105,12 @@ class _SubscriptionViewState extends ConsumerState<SubscriptionView> {
         // view, and `trial_available` defaults to true until the user's history comes back.
         P.state: state.loading ? 'loading' : 'loaded',
       });
+
+      // iOS only, and deliberately here rather than at launch: this is the last screen before a
+      // purchase, so a granted IDFA still reaches the conversion event, and the user has already
+      // been through onboarding rather than meeting a permission dialog cold. Not awaited — the
+      // paywall must paint whether or not the user has answered.
+      unawaited(ensureTrackingConsent());
     });
   }
 
@@ -113,90 +176,125 @@ class _SubscriptionViewState extends ConsumerState<SubscriptionView> {
         }
       },
       child: Scaffold(
-        // A Stack sizes itself to its non-positioned children, so it is told to fill
-        // the screen — otherwise Positioned.fill resolves against a collapsed box.
+        // A Stack sizes itself to its non-positioned children, so it is told to fill the
+        // screen — otherwise Positioned.fill resolves against a collapsed box.
         body: SizedBox.expand(
           child: Stack(
             children: [
+              // Back behind the promo rather than replaced by it. The video is a card, not a
+              // full-bleed background, and the band of bare page around it read as an unfinished
+              // screen — the map is what the rest of the app puts under a floating card.
               const Positioned.fill(child: MapBackground(center: FakeSession.home)),
-              Align(
-                alignment: Alignment.bottomCenter,
-                child: SheetSurface(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const SizedBox(height: 32),
-                      const BrandMark(),
-                      const SizedBox(height: 24),
-                      Text('Location History', style: AppText.display),
-                      const SizedBox(height: 10),
-                      Text(
-                        'Track the location history of your family\nmember & Loved ones 24*7',
-                        style: AppText.body,
-                        textAlign: TextAlign.center,
+              Column(
+                children: [
+                  // Expanded rather than a fixed height so a sheet that grows — an error line,
+                  // the UPI bar appearing after discovery — takes the room from the promo
+                  // instead of overflowing, and so the promo can decide for itself that what is
+                  // left is too little to be worth showing.
+                  Expanded(
+                    child: SafeArea(
+                      bottom: false,
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(
+                            AppShape.gutter, 12, AppShape.gutter, 16),
+                        child: PromoVideo(
+                          url: _videoUrl,
+                          muted: _muted,
+                          // The player onboarding opened, if it opened one for this same URL and
+                          // nothing has claimed it yet. Ownership transfers on the call, so the
+                          // widget disposes it exactly as it disposes its own. `claim` rather than
+                          // `take` so a user who beat the warm-up here waits for it instead of
+                          // starting a second download of the same file.
+                          adopt: ref.read(promoVideoWarmupProvider).claim,
+                          // Quiet from the moment the button is tapped. `phase` goes to
+                          // `opening` before the mandate call, and there are a few hundred
+                          // milliseconds of Edge Function and intent launch before the UPI app
+                          // actually takes the foreground — the lifecycle observer cannot cover
+                          // that gap, and a promo talking over the most important moment of the
+                          // funnel is unforgivable.
+                          paused: state.busy,
+                          onToggleMute: () => setState(() => _muted = !_muted),
+                        ),
                       ),
-                      const SizedBox(height: 24),
-                      if (state.loading || offer == null)
-                        const Padding(
-                          padding: EdgeInsets.symmetric(vertical: 20),
-                          child: CircularProgressIndicator(),
-                        )
-                      else ...[
-                        _PlanRow(offer: offer, trialAvailable: state.trialAvailable),
-                        const SizedBox(height: 12),
-                        _ConsentText(offer: offer, trialAvailable: state.trialAvailable),
-                      ],
-                      if (state.phase == SubscriptionPhase.confirming) ...[
-                        const SizedBox(height: 12),
-                        Text(
-                          'Confirming your payment…',
-                          style: AppText.meta.copyWith(color: AppColors.brand),
-                          textAlign: TextAlign.center,
-                        ),
-                      ],
-                      if (state.error != null) ...[
-                        const SizedBox(height: 12),
-                        Text(
-                          state.error!,
-                          style: AppText.meta.copyWith(
-                            color: Theme.of(context).colorScheme.error,
-                          ),
-                          textAlign: TextAlign.center,
-                        ),
-                      ],
-                      // Hidden when nothing is installed: the button then opens Cashfree's own
-                      // checkout, which is the only route to the enter-a-UPI-ID flow.
-                      if (state.selectedApp != null) ...[
-                        const SizedBox(height: 14),
-                        _UpiAppBar(
-                          app: state.selectedApp!,
-                          onChange: state.busy
-                              ? null
-                              : () => _pickApp(context, ref, state.upiApps,
-                                  state.selectedAppId),
-                        ),
-                      ],
-                      const SizedBox(height: 18),
-                      PrimaryButton(
-                        label: offer == null
-                            ? 'Subscribe Now'
-                            : state.trialAvailable
-                                ? 'Start ${offer.trialDays}-day trial · ${offer.trialPrice}'
-                                : 'Subscribe · ${offer.planPrice}/month',
-                        // Pinned because the label carries the price and the trial length, both
-                        // of which come from config: without this the app's single most
-                        // important button would change id whenever the pricing copy changed.
-                        analyticsId: 'subscribe',
-                        busy: state.busy,
-                        onPressed:
-                            state.canSubscribe ? () => _subscribe(context, ref) : null,
-                      ),
-                      const SizedBox(height: 16),
-                      const TermsFooter(compact: true),
-                      const SizedBox(height: 16),
-                    ],
+                    ),
                   ),
-                ),
+                  SheetSurface(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const SizedBox(height: 32),
+                        const BrandMark(),
+                        const SizedBox(height: 24),
+                        Text('Location History', style: AppText.display),
+                        const SizedBox(height: 10),
+                        Text(
+                          'Track the location history of your family\nmember & Loved ones 24*7',
+                          style: AppText.body,
+                          textAlign: TextAlign.center,
+                        ),
+                        const SizedBox(height: 24),
+                        if (state.loading || offer == null)
+                          const Padding(
+                            padding: EdgeInsets.symmetric(vertical: 20),
+                            child: CircularProgressIndicator(),
+                          )
+                        else ...[
+                          _PlanRow(offer: offer, trialAvailable: state.trialAvailable),
+                          const SizedBox(height: 12),
+                          _ConsentText(offer: offer, trialAvailable: state.trialAvailable),
+                        ],
+                        if (state.phase == SubscriptionPhase.confirming) ...[
+                          const SizedBox(height: 12),
+                          Text(
+                            'Confirming your payment…',
+                            style: AppText.meta.copyWith(color: AppColors.brand),
+                            textAlign: TextAlign.center,
+                          ),
+                        ],
+                        if (state.error != null) ...[
+                          const SizedBox(height: 12),
+                          Text(
+                            state.error!,
+                            style: AppText.meta.copyWith(
+                              color: Theme.of(context).colorScheme.error,
+                            ),
+                            textAlign: TextAlign.center,
+                          ),
+                        ],
+                        // Hidden when nothing is installed: the button then opens Cashfree's own
+                        // checkout, which is the only route to the enter-a-UPI-ID flow.
+                        if (state.selectedApp != null) ...[
+                          const SizedBox(height: 14),
+                          _UpiAppBar(
+                            app: state.selectedApp!,
+                            onChange: state.busy
+                                ? null
+                                : () => _pickApp(context, ref, state.upiApps,
+                                    state.selectedAppId),
+                          ),
+                        ],
+                        const SizedBox(height: 18),
+                        PrimaryButton(
+                          label: offer == null
+                              ? 'Subscribe Now'
+                              : state.trialAvailable
+                                  ? 'Start ${offer.trialDays}-day trial · ${offer.trialPrice}'
+                                  : 'Subscribe · ${offer.planPrice}/month',
+                          // Pinned because the label carries the price and the trial length, both
+                          // of which come from config: without this the app's single most
+                          // important button would change id whenever the pricing copy changed.
+                          analyticsId: 'subscribe',
+                          busy: state.busy,
+                          onPressed:
+                              state.canSubscribe ? () => _subscribe(context, ref) : null,
+                        ),
+                        const SizedBox(height: 16),
+                        const TermsFooter(compact: true),
+                        const SizedBox(height: 16),
+                      ],
+                    ),
+                  ),
+                ],
               ),
             ],
           ),

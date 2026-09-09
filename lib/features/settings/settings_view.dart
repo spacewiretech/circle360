@@ -6,11 +6,9 @@ import '../../app/router.dart';
 import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_theme.dart';
 import '../../app/theme/app_typography.dart';
-import '../../data/analytics/analytics_events.dart';
-import '../../data/entitlement.dart';
 import '../../data/location/location_controller.dart';
-import '../../data/providers.dart';
 import '../../location_service.dart';
+import '../auth/sign_out.dart';
 
 /// Not in the Figma set — a plain list that hosts the entries the design implies, and the
 /// door to the tracking diagnostics screen.
@@ -45,28 +43,9 @@ class SettingsView extends ConsumerWidget {
           _SettingsRow(
             label: 'Sign out',
             hint: 'Stops sharing, clears the local session and restarts onboarding',
-            onTap: () async {
-              final analytics = ref.read(analyticsProvider);
-              // Emitted before the reset, or it would be attributed to the anonymous identity
-              // that replaces this one rather than to the user who actually left.
-              analytics.track(Ev.signedOut);
-
-              // Stop the native tracker and drop its copy of the token first. Signing out
-              // while the service kept uploading would leave the previous user broadcasting
-              // from a handset they have already handed back.
-              await ref
-                  .read(locationControllerProvider.notifier)
-                  .stopSharing(clearCredential: true);
-              await ref.read(authRepositoryProvider).signOut();
-
-              // The analytics counterpart of clearing the session: without it the next person
-              // to sign in on this handset inherits the previous user's Mixpanel profile, and
-              // every one of their events lands on the wrong person.
-              analytics.reset();
-              ref.read(entitlementProvider.notifier).clear();
-
-              if (context.mounted) context.go(Routes.splash);
-            },
+            // Shared with the Profile screen's row, so the two entry points cannot disagree
+            // about what signing out does.
+            onTap: () => confirmSignOut(context, ref, source: 'settings'),
           ),
         ],
       ),

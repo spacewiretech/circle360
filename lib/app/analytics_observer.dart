@@ -41,6 +41,7 @@ const _modalNames = <String, String>{
   'add-person': 'Add Person Sheet',
   'invite-confirm': 'Invite Confirm Dialog',
   'remove-person': 'Remove Person Dialog',
+  'sign-out': 'Sign Out Dialog',
 };
 
 /// The friendly name for a route pattern, or null when it is not one we know.

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -11,6 +13,7 @@ import '../../app/theme/app_theme.dart';
 import '../../app/theme/app_typography.dart';
 import '../../data/analytics/analytics.dart';
 import '../../data/analytics/analytics_events.dart';
+import '../../data/analytics/att_consent.dart';
 import '../../data/entitlement.dart';
 import '../../data/fake/fake_session.dart';
 import '../../data/location/location_controller.dart';
@@ -160,6 +163,11 @@ class _HomeViewState extends ConsumerState<HomeView> with WidgetsBindingObserver
         P.trackingActive: location.permission.canTrack,
         P.permission: location.permission.name,
       });
+
+      // The paywall asks first for anyone on the purchase path; this covers the already-entitled
+      // user who lands straight here and never sees one. Idempotent — iOS only prompts while the
+      // status is undetermined, and the helper guards against a second request in-process.
+      unawaited(ensureTrackingConsent());
     }
 
     // The mandate warning, reported once per state rather than once per rebuild. Whether it is
