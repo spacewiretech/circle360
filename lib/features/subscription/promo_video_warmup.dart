@@ -8,6 +8,7 @@ import 'package:video_player/video_player.dart';
 import '../../app/env.dart';
 import '../../data/analytics/analytics.dart';
 import '../../data/analytics/analytics_events.dart';
+import '../../data/repositories/app_config_repository.dart';
 import 'promo_video.dart';
 
 /// How long a warmed player waits to be claimed before it gives up and releases itself.
@@ -211,17 +212,31 @@ class PromoVideoWarmup {
   /// URL pasted into the dashboard would not reach a device that had launched in the meantime
   /// until the cache aged out, and the paywall would sit there showing no video with nothing
   /// visibly wrong. One row, no cache, no waiting.
+  ///
+  /// The `APP_CONFIG_PAYWALL_VIDEO_URL` line in `app.env` answers when Supabase cannot — this row
+  /// sits outside `appConfigProvider`'s ladder, so nothing else would apply that fallback to it.
+  /// A row that exists and is blank is a deliberate "show no promo" and is taken at its word.
   static Future<String> _readUrlFromConfig() async {
-    if (!Env.hasSupabase) return '';
+    final fallback = appConfigFallbacks()['paywall_video_url']?.trim() ?? '';
+    if (!Env.hasSupabase) return fallback;
 
-    final row = await Supabase.instance.client
-        .from('app_config')
-        .select('value')
-        .eq('key', 'paywall_video_url')
-        .maybeSingle()
-        .timeout(const Duration(seconds: 8));
+    try {
+      final row = await Supabase.instance.client
+          .from('app_config')
+          .select('value')
+          .eq('key', 'paywall_video_url')
+          .maybeSingle()
+          .timeout(const Duration(seconds: 8));
 
-    return (row?['value'] as String?)?.trim() ?? '';
+      if (row == null) return fallback;
+      return (row['value'] as String?)?.trim() ?? '';
+    } catch (_) {
+      // Rethrown when there is nothing to fall back to, because [_start] treats a throw as "no
+      // answer yet" and leaves the paywall to read the row itself. Answering `''` instead would
+      // resolve the URL to "there is no promo" and suppress that retry.
+      if (fallback.isEmpty) rethrow;
+      return fallback;
+    }
   }
 
   /// Deliberately identical to the paywall's own open — same options, same timeout — because an

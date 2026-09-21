@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:loc_360/app/env.dart';
 import 'package:loc_360/data/models/app_user.dart';
 import 'package:loc_360/data/repositories/app_config_repository.dart';
 import 'package:loc_360/data/repositories/auth_repository.dart';
@@ -35,6 +36,88 @@ void main() {
       final config = await repository.load();
 
       expect(config['env'], 'test');
+      expect(config['otp_length'], '6');
+    });
+  });
+
+  /// The rung between Supabase and the compiled constants: `APP_CONFIG_*` lines in `app.env`,
+  /// which is what a device that has never reached Supabase runs on.
+  group('app config env fallbacks', () {
+    // The statics are memoised, so a suite that left values loaded would leak them into the
+    // other 13 suites — all of which expect the fake rung and no env file.
+    tearDown(() => Env.loadFromMapForTest({}));
+
+    test('the prefix is stripped and the key lowercased', () {
+      expect(
+        Env.parseAppConfig({'APP_CONFIG_MAX_TRACKED_PEOPLE': '5'}),
+        {'max_tracked_people': '5'},
+      );
+    });
+
+    test('entries without the prefix are left alone', () {
+      expect(
+        Env.parseAppConfig({
+          'SUPABASE_URL': 'https://example.supabase.co',
+          'FAST2SMS_API_KEY': 'secret',
+          'APP_CONFIG_ENV': 'staging',
+        }),
+        {'env': 'staging'},
+        reason: 'credentials are not config rows and must not leak into the map',
+      );
+    });
+
+    test('a blank entry falls through rather than blanking the default', () {
+      Env.loadFromMapForTest({'APP_CONFIG_TRIAL_PRICE_LABEL': ''});
+
+      expect(Env.appConfig, isEmpty);
+      expect(const <String, String>{}.configString('trial_price_label'), '₹3');
+    });
+
+    test('a secret-shaped key is refused, but the Mixpanel token is not', () {
+      final config = Env.parseAppConfig({
+        'APP_CONFIG_CASHFREE_SECRET_KEY': 'should-never-ship',
+        'APP_CONFIG_RECONCILE_SECRET': 'should-never-ship',
+        'APP_CONFIG_FAST2SMS_API_KEY': 'should-never-ship',
+        'APP_CONFIG_MIXPANEL_TOKEN': 'write-only-by-design',
+      });
+
+      expect(config, {'mixpanel_token': 'write-only-by-design'});
+    });
+
+    test('env beats the compiled defaults', () {
+      Env.loadFromMapForTest({'APP_CONFIG_OTP_LENGTH': '4'});
+
+      expect(appConfigFallbacks().configInt('otp_length'), 4);
+      expect(
+        appConfigFallbacks().configString('min_supported_version'),
+        '1.0.0',
+        reason: 'a key env does not carry still comes from defaultAppConfig',
+      );
+    });
+
+    test('a fetched or cached value still beats env', () {
+      Env.loadFromMapForTest({'APP_CONFIG_OTP_LENGTH': '4'});
+
+      // Stands in for the map `load()` returns once Supabase has answered.
+      const fetched = <String, String>{'otp_length': '8'};
+      expect(fetched.configInt('otp_length'), 8);
+    });
+
+    test('the fake repository serves the env values too', () async {
+      Env.loadFromMapForTest({
+        'APP_CONFIG_ENV': 'staging',
+        'APP_CONFIG_PAYWALL_VIDEO_URL': 'https://cdn.example.com/promo.mp4',
+      });
+
+      const repository = FakeAppConfigRepository({'env': 'test'});
+      final config = await repository.load();
+
+      expect(
+        config['paywall_video_url'],
+        'https://cdn.example.com/promo.mp4',
+        reason: 'a key with no Dart default at all now has a build-time answer',
+      );
+      expect(config['env'], 'test', reason: 'an explicit override still wins');
       expect(config['otp_length'], '6');
     });
   });

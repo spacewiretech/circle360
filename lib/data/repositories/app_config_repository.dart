@@ -1,3 +1,5 @@
+import '../../app/env.dart';
+
 /// Runtime configuration served from the backend rather than baked into the build.
 ///
 /// Everything that is not a credential lives here — environment name, base URLs, limits —
@@ -28,9 +30,13 @@ const mixpanelTokenKey = 'mixpanel_token';
 const facebookAppIdKey = 'facebook_app_id';
 const facebookEnabledKey = 'facebook_events_enabled';
 
-/// Values the app falls back to when config has never been fetched and there is no network.
+/// The last resort, for a checkout with no env file at all.
 ///
-/// A cold start must never block on the network, so these have to be good enough to run on.
+/// A cold start must never block on the network, so these have to be good enough to run on. They
+/// are no longer the only build-time answer though: `assets/env/app.env` carries an
+/// `APP_CONFIG_*` line per public row and is layered over this by [appConfigFallbacks], which is
+/// what lets a fallback value be corrected without editing Dart. Keep this map anyway — it is
+/// what a fresh clone, and every test, runs on.
 const defaultAppConfig = <String, String>{
   'env': 'production',
   'min_supported_version': '1.0.0',
@@ -60,20 +66,33 @@ const defaultAppConfig = <String, String>{
   facebookEnabledKey: 'true',
 };
 
+/// [defaultAppConfig] with the `APP_CONFIG_*` entries from `assets/env/app.env` layered on top.
+///
+/// The rung between Supabase and the compiled constants: a fetched or cached answer still wins,
+/// so a dashboard change is never shadowed, but a build now carries a complete and editable set
+/// of values for the device that has never reached Supabase at all. [defaultAppConfig] stays
+/// underneath as the answer for a checkout with no env file.
+///
+/// A function rather than a constant because [Env.appConfig] is only populated once `Env.load()`
+/// has run, which is after every `const` in this file is already fixed.
+Map<String, String> appConfigFallbacks() =>
+    {...defaultAppConfig, ...Env.appConfig};
+
+/// The same precedence as [appConfigFallbacks], resolved one key at a time.
+///
+/// The typed reads below sit inside build methods, so they take this rather than merging two
+/// maps to read a single string out of the result.
+String _fallback(String key) => Env.appConfig[key] ?? defaultAppConfig[key] ?? '';
+
 /// Typed reads over the raw key/value map, so a bad or missing value can never crash a screen.
 extension AppConfigValues on Map<String, String> {
-  String configString(String key) =>
-      this[key] ?? defaultAppConfig[key] ?? '';
+  String configString(String key) => this[key] ?? _fallback(key);
 
   int configInt(String key) =>
-      int.tryParse(configString(key)) ??
-      int.tryParse(defaultAppConfig[key] ?? '') ??
-      0;
+      int.tryParse(configString(key)) ?? int.tryParse(_fallback(key)) ?? 0;
 
   bool configFlag(String key) => configString(key).toLowerCase() == 'true';
 
   double configDouble(String key) =>
-      double.tryParse(configString(key)) ??
-      double.tryParse(defaultAppConfig[key] ?? '') ??
-      0;
+      double.tryParse(configString(key)) ?? double.tryParse(_fallback(key)) ?? 0;
 }

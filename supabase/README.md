@@ -232,7 +232,11 @@ secret carrying `sub = user_id`; the policies then become the usual `auth.uid() 
   millions of rows — if write rates ever make index locality a problem, move the primary key to
   a time-ordered UUIDv7.
 - **`app_config`.** Add config with `is_public = true`; anything sensitive must be left
-  `false`, where only functions can read it.
+  `false`, where only functions can read it. A new **public** row also wants an
+  `APP_CONFIG_<KEY>` line in [`assets/env/app.env.example`](../assets/env/app.env.example) — that
+  file is the app's offline fallback for this table, and without a line there the row's answer on
+  a device that never reached Supabase is whatever `defaultAppConfig` happens to hold. Never add
+  a private row to it: the env file ships inside the APK.
 - **Payment tables.** `subscriptions`, `subscription_payments` and `payment_events` are all
   RLS-on with zero policies, like `users`. `subscription_payments` is unique on `cf_payment_id`
   and `payment_events` on `dedupe_key`, which is what makes webhook redelivery a no-op rather

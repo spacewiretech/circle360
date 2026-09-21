@@ -111,9 +111,13 @@ Future<Analytics> _startAnalytics() async {
   await analyticsContext.collect(analytics);
 
   try {
-    final cached = await SupabaseAppConfigRepository.readCachedConfig();
-    await mixpanel.start(cached?[mixpanelTokenKey]);
-    await startFacebook(facebook, cached ?? const {});
+    // The env fallbacks stand in when there is no cache, which is the first launch on a device.
+    // With APP_CONFIG_MIXPANEL_TOKEN set that is the difference between starting Mixpanel here
+    // and buffering every launch event until the first fetch returns.
+    final config =
+        await SupabaseAppConfigRepository.readCachedConfig() ?? appConfigFallbacks();
+    await mixpanel.start(config[mixpanelTokenKey]);
+    await startFacebook(facebook, config);
   } catch (error) {
     debugPrint('[analytics] could not read the cached config: $error');
   }

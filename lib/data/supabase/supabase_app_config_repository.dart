@@ -43,13 +43,15 @@ class SupabaseAppConfigRepository implements AppConfigRepository {
               row['value']?.toString() ?? '',
       };
 
+      // Only the fetched rows are persisted; the fallbacks are re-merged on every read, so a
+      // changed env file reaches a device that already has a cache.
       await prefs.setString(_cacheKey, jsonEncode(config));
       await prefs.setInt(_cacheAtKey, DateTime.now().millisecondsSinceEpoch);
-      return {...defaultAppConfig, ...config};
+      return {...appConfigFallbacks(), ...config};
     } catch (error) {
       debugPrint('app_config fetch failed, using ${cached == null ? 'defaults' : 'stale cache'}: $error');
       // Stale beats nothing, and nothing still beats blocking the splash.
-      return cached ?? defaultAppConfig;
+      return cached ?? appConfigFallbacks();
     }
   }
 
@@ -90,7 +92,7 @@ class SupabaseAppConfigRepository implements AppConfigRepository {
     try {
       final decoded = jsonDecode(raw) as Map<String, dynamic>;
       return {
-        ...defaultAppConfig,
+        ...appConfigFallbacks(),
         for (final entry in decoded.entries) entry.key: entry.value.toString(),
       };
     } catch (_) {
@@ -100,6 +102,10 @@ class SupabaseAppConfigRepository implements AppConfigRepository {
 }
 
 /// Used until Supabase is configured, and by tests.
+///
+/// Reads the env fallbacks too: a build with no Supabase URL is exactly the case the
+/// `APP_CONFIG_*` rows exist for, and it would be odd for the rung that can never fetch to be
+/// the one stuck on the compiled constants.
 class FakeAppConfigRepository implements AppConfigRepository {
   const FakeAppConfigRepository([this.overrides = const {}]);
 
@@ -107,5 +113,5 @@ class FakeAppConfigRepository implements AppConfigRepository {
 
   @override
   Future<Map<String, String>> load() async =>
-      {...defaultAppConfig, ...overrides};
+      {...appConfigFallbacks(), ...overrides};
 }

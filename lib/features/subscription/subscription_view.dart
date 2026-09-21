@@ -16,6 +16,7 @@ import '../../app/env.dart';
 import '../../data/fake/fake_session.dart';
 import '../../data/models/subscription_offer.dart';
 import '../../data/models/upi_app.dart';
+import '../../data/repositories/app_config_repository.dart';
 import '../../widgets/brand_logo.dart';
 import '../../widgets/map_background.dart';
 import '../../widgets/primary_button.dart';
@@ -58,6 +59,10 @@ class _SubscriptionViewState extends ConsumerState<SubscriptionView> {
   /// has had this row for a minute already. What is left is the paths that skip onboarding
   /// entirely — a lapsed user routed here by the splash, an eviction by `EntitlementGate`, the
   /// retry button on a failed payment — and for those this is exactly the code it always was.
+  ///
+  /// A failure leaves whatever [initState] seeded from `app.env` in place, which is why the catch
+  /// only logs: the env value is already on screen and overwriting it with `''` would take the
+  /// card away.
   Future<void> _loadVideoUrl() async {
     if (!Env.hasSupabase) return;
     try {
@@ -68,8 +73,10 @@ class _SubscriptionViewState extends ConsumerState<SubscriptionView> {
           .maybeSingle()
           .timeout(const Duration(seconds: 8));
 
-      if (!mounted) return;
-      setState(() => _videoUrl = (row?['value'] as String?)?.trim() ?? '');
+      // A row that exists and is blank is a deliberate "show no promo" and is taken at its word.
+      // No row at all is not an answer, so the seeded value stands.
+      if (!mounted || row == null) return;
+      setState(() => _videoUrl = (row['value'] as String?)?.trim() ?? '');
     } catch (error) {
       // The paywall's job is to take money, and it can do that with no promo at all.
       debugPrint('[paywall] could not read paywall_video_url: $error');
@@ -88,6 +95,11 @@ class _SubscriptionViewState extends ConsumerState<SubscriptionView> {
     if (warmUrl != null) {
       _videoUrl = warmUrl;
     } else {
+      // The `APP_CONFIG_PAYWALL_VIDEO_URL` line in `app.env`, seeded here for the same reason the
+      // warm URL is: it costs nothing and the card gets its real height in frame one. Wired by
+      // hand because this row is the one key outside `appConfigProvider`'s ladder, so nothing
+      // else would ever apply the env fallback to it. The query below overrides it if it answers.
+      _videoUrl = appConfigFallbacks()['paywall_video_url']?.trim() ?? '';
       unawaited(_loadVideoUrl());
     }
     // Stateful purely for this. `Paywall Offer Loaded` cannot stand in as the view event: the
