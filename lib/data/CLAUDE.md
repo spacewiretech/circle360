@@ -21,7 +21,7 @@ repositories. Which one is live is decided in `providers.dart` by `Env.hasSupaba
 
 | File | What it does |
 |---|---|
-| `providers.dart` | The whole data layer, bound. Also `backendMode`, sent with every event so a developer on the fakes is distinguishable from a real user in Mixpanel. |
+| `providers.dart` | The whole data layer, bound. Also `backendMode`, sent with every event so a developer on the fakes is distinguishable from a real user in Mixpanel, and `appVariantProvider` — which of the two apps in this build is running. That one lives here rather than in `lib/suniomax/` because `authRepositoryProvider` depends on it, to stamp a new account with the app it signed up in. |
 | `deeplink_service.dart` | `loc360://` scheme + `parseInvite`. The https App Links / Universal Links half is scaffolding until `assetlinks.json` and `apple-app-site-association` are hosted. **The URL shape must stay in sync with `lib/website/pages/invite_page.dart`.** |
 | `pending_invite.dart` | The invite the app was opened with and has not acted on. Held here so `splashDestinationProvider` stays side-effect-free: the service writes, the screens read and clear. |
 | `entitlement.dart` | The last entitlement answer the server gave, cached where the routing layer can read it *synchronously*. Deliberately not recomputed on write. |
@@ -34,7 +34,7 @@ repositories. Which one is live is decided in `providers.dart` by `Env.hasSupaba
 | `analytics_events.dart` | **The event and property vocabulary — `Ev.*` and `P.*`.** Never type a name at a call site: Mixpanel has no schema and no rename, so one typo is a permanent second event. |
 | `analytics.dart` | The `Analytics` interface. Narrow and synchronous where it can be — a `track` sits inside button handlers and payment callbacks, neither of which may wait. `MultiAnalytics` fans out; `NoopAnalytics` is the default. |
 | `mixpanel_analytics.dart` | The real sink, with a queue in front. The queue exists because the project token is a Supabase `app_config` row, not a compiled-in constant, so events can be produced before the token arrives. |
-| `facebook_analytics.dart` | Conversion reporting for Facebook Ads. The app is bought through Facebook Ads, and an optimiser that only sees installs buys installs that never pay. |
+| `facebook_analytics.dart` | Conversion reporting for Facebook Ads. The app is bought through Facebook Ads, and an optimiser that only sees installs buys installs that never pay. **Both apps in this build report to the same Facebook app**, and `registerSuper` is a no-op here — Facebook's parameters are per-event — so `contentId` (from `AppVariant.fbContentId`) is the only thing telling the two products apart on that side. |
 | `analytics_context.dart` | Device and app facts gathered once and attached as super properties. The header documents what is deliberately **not** collected. |
 | `analytics_session.dart` | Sessions, app lifecycle, and the round trip out to a UPI app and back. |
 | `att_consent.dart` | The iOS ATT prompt, once per install. |
@@ -49,7 +49,7 @@ unstarted.
 |---|---|
 | `edge_functions.dart` | The call wrapper + `EdgeFunctionException`, whose stable `code` strings (`invalid_otp`, `otp_expired`, `throttled`, `unauthorized`…) are what the app maps onto its exception types. |
 | `session_store.dart` | The `verify-otp` bearer token, in Keychain/Keystore via `flutter_secure_storage`. The cached user beside it is only a convenience. |
-| `supabase_auth_repository.dart` | Calls Edge Functions, never tables — `users` has RLS on with **no policies**, so the anon key can do nothing with it. |
+| `supabase_auth_repository.dart` | Calls Edge Functions, never tables — `users` has RLS on with **no policies**, so the anon key can do nothing with it. `verify-otp` also carries `app`, which stamps a brand new row's `signup_app`. Attribution only: it is the one thing here a modified client could choose, and choosing it buys nothing, because both apps open the same mandate on the same plan. |
 | `supabase_family_repository.dart` | `people` / `add-person` / `respond-request`. **Polls rather than using Realtime**: the app authenticates with its own opaque token, not a Supabase JWT, so there is no `auth.uid()` for Realtime's RLS to key off. |
 | `supabase_subscription_repository.dart` | The payment functions. Cashfree is never called from the device, and the client sends no amount, plan id or status — only its session token. |
 | `supabase_app_config_repository.dart` | Reads `app_config` with a disk cache in front. The splash waits on this, so it serves cached-when-fresh and stale-on-failure rather than ever hanging. Under both sits `appConfigFallbacks()` — the `APP_CONFIG_*` env lines over `defaultAppConfig` — so a device that has never reached Supabase still runs on real values. |

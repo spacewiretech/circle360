@@ -5,4 +5,22 @@
          on first use, so nothing in Kotlin has to register it. Android 8+ silently drops any
          notification whose channel does not exist, which is what this exists to prevent. -->
     <string name="default_notification_channel_id">circle360_default</string>
+
+    <!-- The SunioMax lock screen. Kotlin-rendered, so the copy lives here rather than in Dart —
+         the overlay has to draw with no Flutter engine alive. Not translated: the language picker
+         stores a choice for the speech recogniser, and the UI is English for now. -->
+    <string name="lock_locked">Locked</string>
+    <string name="lock_speak">Speak to unlock</string>
+    <string name="lock_or">OR</string>
+    <string name="lock_enter_passcode">Enter passcode</string>
+    <string name="lock_enter_passcode_title">Enter passcode</string>
+    <string name="lock_wrong_passcode">Wrong passcode. Try again.</string>
+    <string name="lock_cancel">Cancel</string>
+    <string name="lock_delete">Delete</string>
+
+    <!-- The microphone foreground service's ongoing notification. Android requires one, and it is
+         also the honest disclosure that something is listening. -->
+    <string name="voice_lock_channel">Voice lock</string>
+    <string name="voice_lock_notification_title">Voice lock is on</string>
+    <string name="voice_lock_notification_text">Listening for your phrase</string>
 </resources>

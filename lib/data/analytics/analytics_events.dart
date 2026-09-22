@@ -157,6 +157,37 @@ abstract final class Ev {
   static const emergencyContactCalled = 'Emergency Contact Called';
   static const termsTapped = 'Terms Tapped';
   static const privacyTapped = 'Privacy Tapped';
+
+  // --- SunioMax ------------------------------------------------------------
+  //
+  // The second app in this build. Every event here also carries `app: suniomax`, so these names
+  // are only for the surfaces SunioMax has and Circle360 does not — its onboarding and paywall
+  // reuse the events above, because they reuse the ViewModels that send them.
+  //
+  // Nothing here ever carries the voice phrase or the backup passcode. Both are credentials: one
+  // unlocks the phone and the other is what a user types when it fails. Shape and length are
+  // reportable; the value never is.
+  static const languageSelected = 'Language Selected';
+  static const voiceLockChanged = 'Voice Lock Changed';
+  static const voicePhraseSaved = 'Voice Phrase Saved';
+  static const backupPasscodeSet = 'Backup Passcode Set';
+  static const appLockChanged = 'App Lock Changed';
+  static const findPhoneChanged = 'Find Phone Changed';
+  static const clapPatternSaved = 'Clap Pattern Saved';
+  static const findPhoneAlertChanged = 'Find Phone Alert Changed';
+  static const tapToSpeakTapped = 'Tap To Speak Tapped';
+
+  /// A spoken onboarding prompt could not be played.
+  ///
+  /// The same argument as [paywallVideoFailed], and it applies harder here. These clips exist
+  /// for users who cannot comfortably read the screen, and a clip that never opens is *silent* —
+  /// there is no gradient, no spinner and no error, just a screen that looks exactly as it did
+  /// before the feature existed. The URLs are operator-editable, which means one will eventually
+  /// be edited wrong, and nobody would think to look at a config row for it.
+  ///
+  /// Carries the clip and the host, never the URL: the row is operator-entered and could hold a
+  /// signed link with a token in its query string.
+  static const onboardingAudioFailed = 'Onboarding Audio Failed';
 }
 
 /// Property keys.
@@ -183,6 +214,14 @@ abstract final class P {
   // `package_info_plus` purely to duplicate them under second, non-standard names that none of
   // Mixpanel's built-in reports know how to read.
   static const env = 'env';
+
+  /// Which of the two apps in this build produced the event — `circle360` or `suniomax`.
+  ///
+  /// Registered at boot, before anything is tracked, so it is on every event including the
+  /// buffered launch ones. Without it the two products share one funnel and neither is readable:
+  /// they have different screens, different conversion rates and different audiences, and only
+  /// this tells them apart. See `lib/suniomax/data/app_variant.dart`.
+  static const app = 'app';
   static const appVersion = 'app_version';
   static const buildNumber = 'build_number';
   static const previousVersion = 'previous_version';
@@ -299,6 +338,41 @@ abstract final class P {
   /// False when the status was already settled on a previous launch, so the opt-in *rate* can be
   /// measured over the users who were actually asked rather than over every launch.
   static const prompted = 'prompted';
+
+  // --- SunioMax ------------------------------------------------------------
+  //
+  // The language a user picked is reported through [appLanguage] and [appLocale] above, which
+  // already exist as super properties — a second pair of keys for the same fact would split
+  // every breakdown that uses them.
+
+  /// Which way a switch was moved. On [Ev.voiceLockChanged] this is the whole event.
+  static const enabled = 'enabled';
+
+  /// Words in the voice phrase, never the phrase. A one-word phrase is far easier for the
+  /// recogniser to miss than a three-word one, and that is the difference worth seeing when a
+  /// user reports the lock not triggering.
+  static const phraseWordCount = 'phrase_word_count';
+
+  /// Whether a backup passcode exists. A user with a voice phrase and no passcode has no way
+  /// back in when the microphone fails, which is the support case this predicts.
+  static const hasPasscode = 'has_passcode';
+
+  /// How many apps the per-app lock covers.
+  static const lockedAppCount = 'locked_app_count';
+
+  /// Claps in the pattern.
+  static const clapCount = 'clap_count';
+
+  /// Which Find Phone alert changed: `sound`, `vibration` or `flashlight`.
+  static const alertType = 'alert_type';
+
+  /// Which `app_config` row a failing asset came from — `suniomax_audio_otp_url` and the like.
+  ///
+  /// The operator-facing identity of the problem, and the only one that is actionable: a screen
+  /// name says where it was noticed, this says which row to fix. Sent alongside [source], which
+  /// carries the host exactly as it does on [Ev.paywallVideoFailed], so one breakdown covers a
+  /// dead bucket across both features.
+  static const configKey = 'config_key';
 }
 
 /// Values for [P.exitType] — how a screen stopped being the one on top.

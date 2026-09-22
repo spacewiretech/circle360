@@ -16,7 +16,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 1.0.2+6
+version: 1.0.3+7
 
 environment:
   sdk: ^3.12.2
@@ -53,6 +53,10 @@ dependencies:
   supabase_flutter: ^2.17.2
   flutter_secure_storage: ^11.0.0
   shared_preferences: ^2.5.5
+  # Hashes the SunioMax backup passcode before it is stored. Already present transitively; made
+  # direct because this is the first place the app imports it, and an import that relies on
+  # somebody else's dependency breaks on their next major version.
+  crypto: ^3.0.7
   # Cashfree UPI Autopay checkout. Only ever handed a session id minted by an Edge Function —
   # no Cashfree credential reaches the device.
   flutter_cashfree_pg_sdk: ^2.4.0
@@ -169,6 +173,10 @@ flutter:
     # without app.env still builds — app.env.example is always present to keep it non-empty.
     # Bundled as a plain asset either way: this keeps keys out of git, not out of the binary.
     - assets/env/
+    # SunioMax's artwork, kept apart from assets/images/ because the two apps in this build share
+    # a repo and not a brand. A directory for the same reason as assets/env/ — the exports are not
+    # in the repo yet and every widget that loads one falls back. See assets/suniomax/README.md.
+    - assets/suniomax/
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images

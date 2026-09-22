@@ -17,7 +17,7 @@ service_role key.
 |---|---|
 | `send-otp` | Sends a code. The review-account check runs *before* the dev bypass, and its response is byte-for-byte a normal success — probing must not reveal which number is the review account. |
 | `resend-otp` | Resend, sharing `send-otp`'s quota and bypass rules. |
-| `verify-otp` | **The one place a `users` row is created.** Verification hits Fast2SMS first, so a row can only exist for a number whose owner received the code. |
+| `verify-otp` | **The one place a `users` row is created.** Verification hits Fast2SMS first, so a row can only exist for a number whose owner received the code. Also stamps `signup_app` — which of the two apps in the build the account was created in — on **insert only**, which is why it asks whether the row exists first. That extra query runs for SunioMax sign-ins alone, so the Circle360 path is unchanged. |
 | `me` | Resolves a stored token back to its user, so a relaunch restores the session — and so a revoked token is actually rejected rather than trusted from the device's cache. |
 | `update-profile` | Sets the name from the post-OTP step. The user id comes from the token, never the body, or anyone could rename any account by guessing a uuid. |
 | `people` | The single read Home makes, polled every 10s: connected people with positions, not-yet-accepted people, unclaimed invites, and inbound requests, all in one call. |

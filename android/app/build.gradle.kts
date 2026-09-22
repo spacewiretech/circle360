@@ -108,6 +108,9 @@ dependencies {
     implementation("com.google.android.gms:play-services-location:21.3.0")
     // ContextCompat / ActivityCompat helpers used by MainActivity and BootReceiver.
     implementation("androidx.core:core-ktx:1.13.1")
+    // Reads the campaign referrer the Play link carried, which is what decides whether a device
+    // runs Circle360 or SunioMax. See InstallReferrer.kt.
+    implementation("com.android.installreferrer:installreferrer:2.2")
 }
 
 flutter {

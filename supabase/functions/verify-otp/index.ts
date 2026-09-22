@@ -35,11 +35,21 @@ Deno.serve(async (req) => {
 
   let mobile: unknown;
   let otp: unknown;
+  let app: unknown;
   try {
-    ({ mobile, otp } = await req.json());
+    ({ mobile, otp, app } = await req.json());
   } catch {
     return fail("invalid_request", "Malformed request.", 400);
   }
+
+  // Which of the two apps in the build this sign-in came from.
+  //
+  // Client-asserted, and deliberately allowed to be: it is attribution, not authorisation.
+  // Both apps open the same Cashfree mandate on the same plan and entitlement is resolved
+  // server-side either way, so a client that lies about this gains a wrong row in a report and
+  // nothing else. Anything unrecognised falls back to `circle360`, which keeps the column inside
+  // its CHECK constraint whatever arrives.
+  const signupApp = app === "suniomax" ? "suniomax" : "circle360";
 
   if (!isValidMobile(mobile)) {
     return fail("invalid_request", "That mobile number is not valid.", 400);
@@ -97,11 +107,34 @@ Deno.serve(async (req) => {
     );
   }
 
+  // `signup_app` records the app an account was CREATED in and must never change afterwards —
+  // a Circle360 subscriber signing in on a SunioMax install is still a Circle360 signup. The
+  // upsert below writes every column it is given, so the only way to make it insert-only is to
+  // know first whether the row exists.
+  //
+  // Asked only on a SunioMax sign-in, so the Circle360 path costs exactly what it always did.
+  // The race between this and the upsert is real and harmless: two simultaneous first sign-ins
+  // for one number would mislabel a report row, and cannot affect billing or entitlement.
+  let stampSignupApp = false;
+  if (signupApp !== "circle360") {
+    const { data: existing } = await db
+      .from("users")
+      .select("user_id")
+      .eq("mobile_no", mobile)
+      .maybeSingle();
+    stampSignupApp = !existing;
+  }
+
   // Upsert, not insert: a returning user verifies the same number again and must land on the
   // row they already own rather than colliding with the unique index.
   const { data: user, error: upsertError } = await db
     .from("users")
-    .upsert({ mobile_no: mobile }, { onConflict: "mobile_no", ignoreDuplicates: false })
+    .upsert(
+      stampSignupApp
+        ? { mobile_no: mobile, signup_app: signupApp }
+        : { mobile_no: mobile },
+      { onConflict: "mobile_no", ignoreDuplicates: false },
+    )
     .select(USER_COLUMNS)
     .single();
 

@@ -24,12 +24,22 @@ class MainActivity : FlutterActivity() {
         private const val METHOD_CHANNEL = "loc360/location"
         private const val EVENT_CHANNEL = "loc360/events"
 
+        /**
+         * The install referrer, on its own channel rather than bolted onto [METHOD_CHANNEL].
+         * That one belongs to the location tracker; this has nothing to do with tracking and is
+         * read exactly once in a device's lifetime, before the app has decided what it even is.
+         */
+        private const val REFERRER_CHANNEL = "circle360/referrer"
+
         private const val REQ_NOTIFICATIONS = 1001
         private const val REQ_LOCATION = 1002
         private const val REQ_BACKGROUND = 1003
     }
 
     private var pendingResult: MethodChannel.Result? = null
+
+    /** The voice lock's bridge. Its own object because it shares nothing with the tracker. */
+    private val voiceLock by lazy { VoiceLockBridge(this) }
     private var eventSink: EventChannel.EventSink? = null
     private var updateReceiver: BroadcastReceiver? = null
 
@@ -51,6 +61,27 @@ class MainActivity : FlutterActivity() {
                     eventSink = null
                 }
             })
+
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, REFERRER_CHANNEL)
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    // Null is a real answer here and means "Play could not tell us", which Dart
+                    // retries on the next launch. It is never reported as an error, because an
+                    // error would be indistinguishable from a device with no Play Store at all.
+                    "getInstallReferrer" -> InstallReferrer.fetch(this) { result.success(it) }
+                    else -> result.notImplemented()
+                }
+            }
+
+        MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            VoiceLockBridge.METHOD_CHANNEL,
+        ).setMethodCallHandler(voiceLock::methodHandler)
+
+        EventChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            VoiceLockBridge.EVENT_CHANNEL,
+        ).setStreamHandler(voiceLock.streamHandler())
     }
 
     private fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
@@ -232,6 +263,8 @@ class MainActivity : FlutterActivity() {
         grantResults: IntArray,
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        // The voice lock owns its own request codes; it returns true when it handled one.
+        if (voiceLock.onRequestPermissionsResult(requestCode)) return
         when (requestCode) {
             // Notifications are best-effort: a refusal shouldn't block location tracking.
             REQ_NOTIFICATIONS -> requestForegroundLocation()
@@ -304,6 +337,7 @@ class MainActivity : FlutterActivity() {
 
     override fun onDestroy() {
         unregisterUpdateReceiver()
+        voiceLock.dispose()
         super.onDestroy()
     }
 }

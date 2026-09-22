@@ -10,7 +10,8 @@ location service and a UPI checkout that only exists inside the Cashfree app.
 ## Commands
 
 ```bash
-flutter test                      # 14 suites in test/
+flutter run --dart-define=SUNIOMAX_FORCE=true   # run the OTHER app in this build — see below
+flutter test                      # 18 suites in test/
 flutter analyze
 dart format .
 flutter build apk / ipa
@@ -32,6 +33,9 @@ view  ->  viewmodel  ->  repository interface  ->  implementation
 **Every binding lives in [lib/data/providers.dart](lib/data/providers.dart).** No view and no
 viewmodel imports a concrete implementation — swapping a backend means changing the right-hand
 side of one provider and nothing else. Read that file before changing anything in the data layer.
+The one sanctioned sibling is [lib/suniomax/data/providers.dart](lib/suniomax/data/providers.dart),
+which holds the bindings belonging to the second app alone; the no-concrete-imports rule applies
+there identically.
 
 Routing is flat: [lib/app/router.dart](lib/app/router.dart) has no global redirect. The splash
 resolves the stored session and each onboarding step decides where it goes next. Screens past the
@@ -52,6 +56,24 @@ level of configuration, and which rung is live changes what is real:
 Selected in [lib/data/providers.dart](lib/data/providers.dart) and reported on every analytics
 event as `backendMode`, so a developer on the fakes is distinguishable from a real user.
 
+### Two apps in one APK
+
+The other load-bearing non-obvious thing. This build ships **Circle360 and SunioMax**, a
+voice-lock app shown only to installs that arrived through a paid campaign, identified by the Play
+install referrer. `bootMobileApp()` resolves which one a device runs and builds either
+`Loc360App` or `SunioMaxApp`; every event carries `app` so the two funnels never merge.
+
+Read [lib/suniomax/CLAUDE.md](lib/suniomax/CLAUDE.md) before touching anything there. Two things
+to know before you touch anything *elsewhere*:
+
+- **Circle360 is itself bought through Facebook Ads**, so its own installs carry the same
+  `utm_source=facebook` a SunioMax campaign does. `AppVariant.resolve()` has an upgrade guard
+  that pins any pre-existing install to Circle360 before the referrer is ever consulted. Removing
+  it moves paying Circle360 subscribers into the wrong app on their next update.
+- SunioMax reuses Circle360's auth, subscription and payment-status **ViewModels unchanged** —
+  same numbers, same Edge Functions, same Cashfree plan. Only the views differ. A change to one of
+  those ViewModels changes both products.
+
 ## Directory map
 
 Each of these has its own `CLAUDE.md` with a one-line entry per file. **Read the subtree doc
@@ -62,12 +84,13 @@ before grepping or reading files in that area.**
 | [lib/app/](lib/app/) | App shell, router, env, entitlement gate, analytics observer, theme |
 | [lib/data/](lib/data/) | The whole data layer — providers, repositories + 3 implementations, models, analytics, payments, push |
 | [lib/features/](lib/features/) | Every screen, as `*_view.dart` / `*_viewmodel.dart` / `*_state.dart` triples |
+| [lib/suniomax/](lib/suniomax/) | **The second app in this build.** Its own shell, router, theme, widgets and screens — see below |
 | [lib/widgets/](lib/widgets/) | Shared UI, exported from Figma |
 | [lib/website/](lib/website/) | The marketing site — the entire web build, independent of the app |
 | [supabase/functions/](supabase/functions/) | Edge Functions. Schema, security model and deploy steps are in [supabase/README.md](supabase/README.md) |
 | [android/](android/) | Kotlin foreground-service location tracker |
 | [ios/](ios/) | Swift CoreLocation tracker |
-| [test/](test/) | 14 suites |
+| [test/](test/) | 18 suites |
 
 ### Files directly under `lib/`
 

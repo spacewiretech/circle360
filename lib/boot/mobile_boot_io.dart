@@ -20,6 +20,8 @@ import '../data/providers.dart';
 import '../data/repositories/app_config_repository.dart';
 import '../data/supabase/supabase_app_config_repository.dart';
 import '../firebase_options.dart';
+import '../suniomax/app/app.dart';
+import '../suniomax/data/app_variant.dart';
 
 export '../app/app.dart' show Loc360App;
 
@@ -69,14 +71,26 @@ Future<void> bootMobileApp() async {
     }
   }
 
-  final analytics = await _startAnalytics();
+  // Which of the two apps in this build this device runs. Resolved before analytics so that
+  // `app` is registered as a super property ahead of the first buffered event — a launch event
+  // that cannot say which product it belongs to is not worth much.
+  //
+  // Free on every launch after the first: the answer is read from SharedPreferences. The first
+  // launch on a device spends up to three seconds asking Play for the install referrer, behind
+  // the native launch theme, and falls back to Circle360 if it gets no answer.
+  final variant = await AppVariant.resolve();
+
+  final analytics = await _startAnalytics(variant);
 
   runApp(
     ProviderScope(
       // The same instance the global holder has, so the router observer, the shared widgets and
       // the ViewModels can never end up talking to two different sinks.
-      overrides: [analyticsProvider.overrideWithValue(analytics)],
-      child: const Loc360App(),
+      overrides: [
+        analyticsProvider.overrideWithValue(analytics),
+        appVariantProvider.overrideWithValue(variant),
+      ],
+      child: variant.isSunioMax ? const SunioMaxApp() : const Loc360App(),
     ),
   );
 }
@@ -88,9 +102,11 @@ Future<void> bootMobileApp() async {
 /// [SupabaseAppConfigRepository] already keeps on disk; a first launch finds nothing there and
 /// both sinks are started later by [analyticsBootstrapProvider], with the launch events buffered
 /// in the meantime.
-Future<Analytics> _startAnalytics() async {
+Future<Analytics> _startAnalytics(AppVariant variant) async {
   final mixpanel = MixpanelAnalytics();
-  final facebook = FacebookAnalytics();
+  // Both apps report to the same Facebook app, and Facebook has no super properties — so the
+  // content id is the only thing that tells the two products' conversions apart on that side.
+  final facebook = FacebookAnalytics(contentId: variant.fbContentId);
 
   // Two sinks with very different appetites behind one interface: Mixpanel answers product
   // questions and takes everything, Facebook trains an ad optimiser and takes four conversions.
@@ -104,7 +120,10 @@ Future<Analytics> _startAnalytics() async {
         ...analyticsObserver.contextProperties(),
         ...analyticsSession.contextProperties(),
       };
-  analytics.registerSuper({P.backendMode: backendMode});
+  // `app` rides alongside `backendMode` because it answers the same kind of question: without it
+  // two products with different screens, different funnels and different audiences share one
+  // event stream and neither is readable.
+  analytics.registerSuper({P.backendMode: backendMode, P.app: variant.id});
 
   // The single place device, locale, version and install context is gathered. Awaited before the
   // token so that even the very first buffered event — `App Launched` — already carries it.

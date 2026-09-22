@@ -11,10 +11,23 @@ import 'session_store.dart';
 /// mutation goes through a function holding the service_role key, which also keeps the
 /// Fast2SMS credentials off the device.
 class SupabaseAuthRepository implements AuthRepository {
-  SupabaseAuthRepository(this._functions, this._sessions);
+  SupabaseAuthRepository(this._functions, this._sessions,
+      {this.appId = 'circle360'});
 
   final EdgeFunctions _functions;
   final SessionStore _sessions;
+
+  /// Which of the two apps in this build is asking, sent with [verifyOtp] so a brand new account
+  /// records where it came from.
+  ///
+  /// Client-asserted, and safe to be. It is the one thing about this request that a modified
+  /// client could choose, and choosing it buys nothing: both apps open the same Cashfree mandate
+  /// on the same plan, and entitlement is resolved server-side from the subscription either way.
+  /// A false value costs an attribution row, not money — which is exactly why the amounts, the
+  /// plan id and the status are still never sent from here.
+  ///
+  /// Defaults to Circle360 so every existing call site, and every test, behaves as it did.
+  final String appId;
 
   @override
   Future<void> sendOtp(String phone) =>
@@ -27,7 +40,8 @@ class SupabaseAuthRepository implements AuthRepository {
   @override
   Future<AppUser> verifyOtp({required String phone, required String code}) async {
     final data = await _guard(
-      () => _functions.call('verify-otp', body: {'mobile': phone, 'otp': code}),
+      () => _functions
+          .call('verify-otp', body: {'mobile': phone, 'otp': code, 'app': appId}),
     );
 
     final token = data['token'] as String?;

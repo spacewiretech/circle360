@@ -7,6 +7,8 @@ import '../../data/analytics/analytics_events.dart';
 import '../../data/entitlement.dart';
 import '../../data/location/location_controller.dart';
 import '../../data/providers.dart';
+import '../../suniomax/app/routes.dart';
+import '../../suniomax/data/providers.dart';
 
 /// Everything that has to happen when a user leaves, in the one order that is correct.
 ///
@@ -34,6 +36,14 @@ class SignOutAction {
     await _ref
         .read(locationControllerProvider.notifier)
         .stopSharing(clearCredential: true);
+    // SunioMax only. The lock phrase, the unlock phrase and the backup passcode live in app
+    // storage rather than on the account, so leaving them behind would let the next person to
+    // sign in on this handset be protected — and locked out — by a stranger's voice. Also stops
+    // the microphone service, which has no business running for an account nobody is signed in to.
+    if (_ref.read(appVariantProvider).isSunioMax) {
+      await _ref.read(voiceLockRepositoryProvider).clear();
+    }
+
     await _ref.read(authRepositoryProvider).signOut();
 
     // The analytics counterpart of clearing the session: without it the next person to sign in
@@ -60,6 +70,7 @@ Future<void> confirmSignOut(
   BuildContext context,
   WidgetRef ref, {
   required String source,
+  String? message,
 }) async {
   if (_signingOut) return;
 
@@ -73,9 +84,10 @@ Future<void> confirmSignOut(
     routeSettings: const RouteSettings(name: 'sign-out'),
     builder: (context) => AlertDialog(
       title: const Text('Log out?'),
-      content: const Text(
-        'You will stop sharing your location and will need to sign in with your '
-        'phone number again.',
+      content: Text(
+        message ??
+            'You will stop sharing your location and will need to sign in with your '
+                'phone number again.',
       ),
       actions: [
         TextButton(
@@ -104,5 +116,8 @@ Future<void> confirmSignOut(
 
   // The splash re-resolves the session and, finding none, lands on phone entry. Going there
   // rather than to `/phone` directly keeps one place deciding where a session belongs.
-  if (context.mounted) context.go(Routes.splash);
+  if (!context.mounted) return;
+  context.go(
+    ref.read(appVariantProvider).isSunioMax ? SxRoutes.splash : Routes.splash,
+  );
 }

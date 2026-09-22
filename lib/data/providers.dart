@@ -4,6 +4,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../app/env.dart';
 import '../location_service.dart';
+import '../suniomax/data/app_variant.dart';
 import 'analytics/analytics.dart';
 import 'analytics/analytics_events.dart';
 import 'analytics/facebook_analytics.dart';
@@ -39,6 +40,17 @@ import 'repositories/subscription_repository.dart';
 ///
 /// e.g. `authRepositoryProvider` becomes
 /// `Provider<AuthRepository>((ref) => SupabaseAuthRepository(Supabase.instance.client))`.
+
+/// Which of the two apps in this build this install runs.
+///
+/// Overridden at boot with the value `AppVariant.resolve()` worked out. The default is here so
+/// that a widget test, or anything that never ran `bootMobileApp`, behaves exactly like an
+/// ordinary Circle360 install.
+///
+/// Bound in this file rather than in `lib/suniomax/data/providers.dart` because
+/// [authRepositoryProvider] below depends on it: a new account is stamped with the app it was
+/// created in, and that has to be injected rather than reached for.
+final appVariantProvider = Provider<AppVariant>((ref) => AppVariant.circle360);
 
 final fakeSessionProvider = Provider<FakeSession>((ref) => FakeSession.instance);
 
@@ -116,6 +128,10 @@ final authRepositoryProvider = Provider<AuthRepository>((ref) {
     return SupabaseAuthRepository(
       SupabaseEdgeFunctions(Supabase.instance.client),
       ref.watch(sessionStoreProvider),
+      // Stamped onto a brand new account so the two products' funnels are separable in SQL, the
+      // way `app` already separates them in Mixpanel. Attribution only — it decides nothing
+      // about entitlement or pricing.
+      appId: ref.watch(appVariantProvider).id,
     );
   }
 

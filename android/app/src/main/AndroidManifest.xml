@@ -20,6 +20,17 @@
     <!-- Android 13+ : without this the ongoing service notification is silently hidden. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
 
+    <!-- SunioMax's voice lock. All four are inert in Circle360, which never arms the service:
+         the switch that starts it only exists on the SunioMax home screen. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO"/>
+    <!-- Android 14+ requires the type-specific permission alongside foregroundServiceType. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE"/>
+    <!-- "Display over other apps". The lock screen is a window, not an Activity, because an
+         Activity can be dismissed with Home and a TYPE_APPLICATION_OVERLAY window cannot. -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/>
+    <!-- Keeps the screen on while the lock overlay is up. -->
+    <uses-permission android:name="android.permission.WAKE_LOCK"/>
+
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"/>
 
@@ -94,6 +105,16 @@
             android:exported="false"
             android:foregroundServiceType="location"/>
 
+        <!-- A second service rather than a second type on the first one. They are armed
+             independently, by two different apps in this build, and a single service declaring
+             "location|microphone" would have to hold both permissions to start at all — so a
+             Circle360 user would be starting a microphone service they never asked for. -->
+        <service
+            android:name=".VoiceLockService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="microphone"/>
+
         <receiver
             android:name=".BootReceiver"
             android:enabled="true"
@@ -102,6 +123,11 @@
                 <action android:name="android.intent.action.BOOT_COMPLETED"/>
                 <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED"/>
                 <action android:name="android.intent.action.QUICKBOOT_POWERON"/>
+                <!-- The voice lock's restart alarm, from VoiceLockService.onTaskRemoved. NOT the
+                     boot actions above: Android 14+ refuses to start a microphone foreground
+                     service from a boot broadcast, so after a reboot the user must reopen the
+                     app once. There is no exemption to apply for. -->
+                <action android:name="com.spacewire.circle360.RESTART_VOICE"/>
             </intent-filter>
         </receiver>
 
@@ -176,6 +202,14 @@
         <intent>
             <action android:name="android.intent.action.PROCESS_TEXT"/>
             <data android:mimeType="text/plain"/>
+        </intent>
+
+        <!-- Android 11+ package visibility. Without this
+             SpeechRecognizer.isRecognitionAvailable() returns false on API 30+ even when a
+             recogniser is installed, and the voice lock refuses to arm on a perfectly good
+             phone. -->
+        <intent>
+            <action android:name="android.speech.RecognitionService"/>
         </intent>
 
         <!-- Android 11+ package visibility. The Cashfree SDK resolves the installed UPI apps to

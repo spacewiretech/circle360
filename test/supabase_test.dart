@@ -26,7 +26,11 @@ void main() {
 
     test('a garbled value does not crash a screen', () {
       const config = <String, String>{'otp_length': 'six'};
-      expect(config.configInt('otp_length'), 6, reason: 'falls back to the default');
+      expect(
+        config.configInt('otp_length'),
+        6,
+        reason: 'falls back to the default',
+      );
       expect(config.configString('nothing_here'), '');
       expect(config.configFlag('nothing_here'), isFalse);
     });
@@ -48,10 +52,9 @@ void main() {
     tearDown(() => Env.loadFromMapForTest({}));
 
     test('the prefix is stripped and the key lowercased', () {
-      expect(
-        Env.parseAppConfig({'APP_CONFIG_MAX_TRACKED_PEOPLE': '5'}),
-        {'max_tracked_people': '5'},
-      );
+      expect(Env.parseAppConfig({'APP_CONFIG_MAX_TRACKED_PEOPLE': '5'}), {
+        'max_tracked_people': '5',
+      });
     });
 
     test('entries without the prefix are left alone', () {
@@ -62,7 +65,8 @@ void main() {
           'APP_CONFIG_ENV': 'staging',
         }),
         {'env': 'staging'},
-        reason: 'credentials are not config rows and must not leak into the map',
+        reason:
+            'credentials are not config rows and must not leak into the map',
       );
     });
 
@@ -82,6 +86,33 @@ void main() {
       });
 
       expect(config, {'mixpanel_token': 'write-only-by-design'});
+    });
+
+    test('the SunioMax media rows survive the refusal', () {
+      // The other half of the test above, and the only thing that would ever catch this: a
+      // refused key is dropped with a `debugPrint` and a `continue`, not an exception, so a rename
+      // that tripped the regex would fail *silently* — the clip would simply never play and the
+      // paywall would quietly fall back to Circle360's video.
+      //
+      // `password` and `credential` in that pattern are unanchored substrings, so this is less
+      // theoretical than it looks: a future `suniomax_password_reset_url` would vanish.
+      final config = Env.parseAppConfig({
+        'APP_CONFIG_SUNIOMAX_AUDIO_LANGUAGE_URL':
+            'https://cdn.example.com/a.mp3',
+        'APP_CONFIG_SUNIOMAX_AUDIO_PHONE_URL': 'https://cdn.example.com/b.mp3',
+        'APP_CONFIG_SUNIOMAX_AUDIO_OTP_URL': 'https://cdn.example.com/c.mp3',
+        'APP_CONFIG_SUNIOMAX_AUDIO_NAME_URL': 'https://cdn.example.com/d.mp3',
+        'APP_CONFIG_SUNIOMAX_PAYWALL_VIDEO_URL':
+            'https://cdn.example.com/p.mp4',
+      });
+
+      expect(config.keys, [
+        sunioMaxAudioLanguageKey,
+        sunioMaxAudioPhoneKey,
+        sunioMaxAudioOtpKey,
+        sunioMaxAudioNameKey,
+        sunioMaxPaywallVideoKey,
+      ]);
     });
 
     test('env beats the compiled defaults', () {
@@ -146,12 +177,22 @@ void main() {
     };
 
     test('verifying stores the session and returns the new user', () async {
-      functions.responses['verify-otp'] = {'user': userRow, 'token': 'secret-token'};
+      functions.responses['verify-otp'] = {
+        'user': userRow,
+        'token': 'secret-token',
+      };
 
-      final user = await repository.verifyOtp(phone: '9931145610', code: '123456');
+      final user = await repository.verifyOtp(
+        phone: '9931145610',
+        code: '123456',
+      );
 
       expect(user.phone, '9931145610');
-      expect(user.hasName, isFalse, reason: 'name is collected on the next screen');
+      expect(
+        user.hasName,
+        isFalse,
+        reason: 'name is collected on the next screen',
+      );
       // A signup that has not paid the ₹3 has no trial yet, so the paywall still shows.
       expect(user.entitled, isFalse);
       expect(user.paymentType, PaymentType.trial);
@@ -171,9 +212,16 @@ void main() {
         'token': 't',
       };
 
-      final user = await repository.verifyOtp(phone: '9931145610', code: '123456');
+      final user = await repository.verifyOtp(
+        phone: '9931145610',
+        code: '123456',
+      );
       expect(user.entitled, isTrue);
-      expect(user.isSubscribed, isTrue, reason: 'the legacy getter tracks entitlement');
+      expect(
+        user.isSubscribed,
+        isTrue,
+        reason: 'the legacy getter tracks entitlement',
+      );
     });
 
     test('an active plan whose period has lapsed is not entitled', () async {
@@ -187,50 +235,80 @@ void main() {
         'token': 't',
       };
 
-      final user = await repository.verifyOtp(phone: '9931145610', code: '123456');
-      expect(user.entitled, isFalse, reason: 'a failed renewal must reach the paywall');
+      final user = await repository.verifyOtp(
+        phone: '9931145610',
+        code: '123456',
+      );
+      expect(
+        user.entitled,
+        isFalse,
+        reason: 'a failed renewal must reach the paywall',
+      );
       expect(user.paymentType, PaymentType.active);
     });
 
-    test('a payment_type this build does not know falls back to the paywall', () async {
-      functions.responses['verify-otp'] = {
-        'user': {...userRow, 'payment_type': 'some_future_state'},
-        'token': 't',
-      };
+    test(
+      'a payment_type this build does not know falls back to the paywall',
+      () async {
+        functions.responses['verify-otp'] = {
+          'user': {...userRow, 'payment_type': 'some_future_state'},
+          'token': 't',
+        };
 
-      final user = await repository.verifyOtp(phone: '9931145610', code: '123456');
-      expect(user.paymentType, PaymentType.trial);
-      expect(user.entitled, isFalse);
-    });
-
-    test('each error code becomes the exception the OTP screen handles', () async {
-      final cases = <String, Matcher>{
-        'invalid_otp': isA<InvalidOtpException>(),
-        'otp_expired': isA<OtpExpiredException>(),
-        'throttled': isA<OtpSendException>(),
-        'send_failed': isA<OtpSendException>(),
-        'server_error': isA<OtpSendException>(),
-      };
-
-      for (final entry in cases.entries) {
-        functions.errors['verify-otp'] = EdgeError(entry.key, 'message for ${entry.key}');
-        await expectLater(
-          repository.verifyOtp(phone: '9931145610', code: '123456'),
-          throwsA(entry.value),
-          reason: entry.key,
+        final user = await repository.verifyOtp(
+          phone: '9931145610',
+          code: '123456',
         );
-      }
-    });
+        expect(user.paymentType, PaymentType.trial);
+        expect(user.entitled, isFalse);
+      },
+    );
 
-    test('a transport failure surfaces the message the function never sent', () async {
-      functions.errors['send-otp'] = const EdgeError(null, 'No internet connection.');
+    test(
+      'each error code becomes the exception the OTP screen handles',
+      () async {
+        final cases = <String, Matcher>{
+          'invalid_otp': isA<InvalidOtpException>(),
+          'otp_expired': isA<OtpExpiredException>(),
+          'throttled': isA<OtpSendException>(),
+          'send_failed': isA<OtpSendException>(),
+          'server_error': isA<OtpSendException>(),
+        };
 
-      await expectLater(
-        repository.sendOtp('9931145610'),
-        throwsA(isA<OtpSendException>()
-            .having((e) => e.message, 'message', 'No internet connection.')),
-      );
-    });
+        for (final entry in cases.entries) {
+          functions.errors['verify-otp'] = EdgeError(
+            entry.key,
+            'message for ${entry.key}',
+          );
+          await expectLater(
+            repository.verifyOtp(phone: '9931145610', code: '123456'),
+            throwsA(entry.value),
+            reason: entry.key,
+          );
+        }
+      },
+    );
+
+    test(
+      'a transport failure surfaces the message the function never sent',
+      () async {
+        functions.errors['send-otp'] = const EdgeError(
+          null,
+          'No internet connection.',
+        );
+
+        await expectLater(
+          repository.sendOtp('9931145610'),
+          throwsA(
+            isA<OtpSendException>().having(
+              (e) => e.message,
+              'message',
+              'No internet connection.',
+            ),
+          ),
+        );
+      },
+    );
 
     test('saving the name sends the session token, not a user id', () async {
       await sessions.save(
@@ -249,23 +327,35 @@ void main() {
       expect(functions.bodiesSeen['update-profile'], {'name': 'Ayush'});
     });
 
-    test('saving a name with no session refuses rather than calling out', () async {
-      await expectLater(repository.saveName('Ayush'), throwsA(isA<OtpSendException>()));
-      expect(functions.calls, isEmpty);
-    });
+    test(
+      'saving a name with no session refuses rather than calling out',
+      () async {
+        await expectLater(
+          repository.saveName('Ayush'),
+          throwsA(isA<OtpSendException>()),
+        );
+        expect(functions.calls, isEmpty);
+      },
+    );
 
     group('currentUser', () {
-      test('is null with no stored session, without calling the backend', () async {
-        expect(await repository.currentUser(), isNull);
-        expect(functions.calls, isEmpty);
-      });
+      test(
+        'is null with no stored session, without calling the backend',
+        () async {
+          expect(await repository.currentUser(), isNull);
+          expect(functions.calls, isEmpty);
+        },
+      );
 
       test('a rejected session is cleared so it cannot be reused', () async {
         await sessions.save(
           token: 'revoked',
           user: const AppUser(id: 'u', phone: '9931145610'),
         );
-        functions.errors['me'] = const EdgeError('unauthorized', 'Please sign in again.');
+        functions.errors['me'] = const EdgeError(
+          'unauthorized',
+          'Please sign in again.',
+        );
 
         expect(await repository.currentUser(), isNull);
         expect(await sessions.readToken(), isNull);
@@ -276,11 +366,18 @@ void main() {
           token: 'good',
           user: const AppUser(id: 'u', phone: '9931145610', name: 'Ayush'),
         );
-        functions.errors['me'] = const EdgeError(null, 'No internet connection.');
+        functions.errors['me'] = const EdgeError(
+          null,
+          'No internet connection.',
+        );
 
         final user = await repository.currentUser();
 
-        expect(user?.name, 'Ayush', reason: 'a flaky network must not sign the user out');
+        expect(
+          user?.name,
+          'Ayush',
+          reason: 'a flaky network must not sign the user out',
+        );
         expect(await sessions.readToken(), 'good');
       });
     });

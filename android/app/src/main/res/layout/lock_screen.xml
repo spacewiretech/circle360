@@ -1,0 +1,227 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The SunioMax lock screen, drawn by LockOverlay as a TYPE_APPLICATION_OVERLAY window.
+
+  Two faces in one layout, swapped by visibility rather than by navigating: "Speak to unlock"
+  (Figma 13511:14622) and the 4-dot passcode keypad (13511:14662). Navigation would mean a second
+  window, and every extra window is another thing that can fail to come back.
+
+  Plain Android views on purpose. This has to render with no Flutter engine — the service outlives
+  the Dart isolate, and the whole point is that the lock still works after the app is swiped away.
+  It is also the first layout in this project; there is no AppCompat or Material dependency, so
+  everything here is a framework widget.
+-->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#FFFFFF"
+    android:fitsSystemWindows="false">
+
+    <!-- ============================ Speak to unlock ============================ -->
+    <LinearLayout
+        android:id="@+id/lock_voice_face"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:gravity="center_horizontal"
+        android:paddingStart="24dp"
+        android:paddingEnd="24dp">
+
+        <ImageView
+            android:layout_width="34dp"
+            android:layout_height="34dp"
+            android:layout_marginTop="72dp"
+            android:src="@android:drawable/ic_lock_lock"
+            android:contentDescription="@string/lock_locked"
+            android:tint="#2C6AA2"/>
+
+        <TextView
+            android:id="@+id/lock_date"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="26dp"
+            android:textSize="15sp"
+            android:textColor="#7A7068"/>
+
+        <TextView
+            android:id="@+id/lock_clock"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:textSize="52sp"
+            android:textStyle="bold"
+            android:textColor="#0E1E3C"/>
+
+        <FrameLayout
+            android:layout_width="220dp"
+            android:layout_height="220dp"
+            android:layout_marginTop="44dp">
+
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:background="@drawable/lock_blob"/>
+
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center"
+                android:orientation="vertical"
+                android:gravity="center_horizontal">
+
+                <ImageView
+                    android:layout_width="42dp"
+                    android:layout_height="42dp"
+                    android:src="@android:drawable/ic_btn_speak_now"
+                    android:contentDescription="@string/lock_speak"
+                    android:tint="#FFFFFF"/>
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="10dp"
+                    android:text="@string/lock_speak"
+                    android:textSize="19sp"
+                    android:textStyle="bold"
+                    android:textColor="#FFFFFF"/>
+            </LinearLayout>
+        </FrameLayout>
+
+        <!-- Pushes the fallback to the foot of the screen, as in the frame. -->
+        <View
+            android:layout_width="0dp"
+            android:layout_height="0dp"
+            android:layout_weight="1"/>
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/lock_or"
+            android:textSize="14sp"
+            android:textColor="#9AA3AD"/>
+
+        <TextView
+            android:id="@+id/lock_show_passcode"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="14dp"
+            android:layout_marginBottom="48dp"
+            android:paddingStart="52dp"
+            android:paddingEnd="52dp"
+            android:paddingTop="16dp"
+            android:paddingBottom="16dp"
+            android:background="@drawable/lock_pill_outline"
+            android:text="@string/lock_enter_passcode"
+            android:textSize="17sp"
+            android:textStyle="bold"
+            android:textColor="#2C6AA2"/>
+    </LinearLayout>
+
+    <!-- ============================== The keypad ============================== -->
+    <LinearLayout
+        android:id="@+id/lock_passcode_face"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:gravity="center_horizontal"
+        android:visibility="gone"
+        android:paddingStart="24dp"
+        android:paddingEnd="24dp">
+
+        <ImageView
+            android:layout_width="34dp"
+            android:layout_height="34dp"
+            android:layout_marginTop="72dp"
+            android:src="@android:drawable/ic_lock_lock"
+            android:contentDescription="@string/lock_locked"
+            android:tint="#2C6AA2"/>
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="58dp"
+            android:text="@string/lock_enter_passcode_title"
+            android:textSize="26sp"
+            android:textStyle="bold"
+            android:textColor="#0E1E3C"/>
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="22dp"
+            android:orientation="horizontal">
+
+            <View android:id="@+id/lock_dot_1" android:layout_width="14dp" android:layout_height="14dp" android:layout_marginStart="9dp" android:layout_marginEnd="9dp"/>
+            <View android:id="@+id/lock_dot_2" android:layout_width="14dp" android:layout_height="14dp" android:layout_marginStart="9dp" android:layout_marginEnd="9dp"/>
+            <View android:id="@+id/lock_dot_3" android:layout_width="14dp" android:layout_height="14dp" android:layout_marginStart="9dp" android:layout_marginEnd="9dp"/>
+            <View android:id="@+id/lock_dot_4" android:layout_width="14dp" android:layout_height="14dp" android:layout_marginStart="9dp" android:layout_marginEnd="9dp"/>
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/lock_passcode_error"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="@string/lock_wrong_passcode"
+            android:textSize="14sp"
+            android:textColor="#ED1C24"
+            android:visibility="gone"/>
+
+        <!-- 1 2 3 -->
+        <LinearLayout style="@style/LockKeyRow">
+            <TextView android:id="@+id/key_1" style="@style/LockKey" android:text="1"/>
+            <TextView android:id="@+id/key_2" style="@style/LockKey" android:text="2"/>
+            <TextView android:id="@+id/key_3" style="@style/LockKey" android:text="3"/>
+        </LinearLayout>
+
+        <!-- 4 5 6 -->
+        <LinearLayout style="@style/LockKeyRow">
+            <TextView android:id="@+id/key_4" style="@style/LockKey" android:text="4"/>
+            <TextView android:id="@+id/key_5" style="@style/LockKey" android:text="5"/>
+            <TextView android:id="@+id/key_6" style="@style/LockKey" android:text="6"/>
+        </LinearLayout>
+
+        <!-- 7 8 9 -->
+        <LinearLayout style="@style/LockKeyRow">
+            <TextView android:id="@+id/key_7" style="@style/LockKey" android:text="7"/>
+            <TextView android:id="@+id/key_8" style="@style/LockKey" android:text="8"/>
+            <TextView android:id="@+id/key_9" style="@style/LockKey" android:text="9"/>
+        </LinearLayout>
+
+        <!-- (blank) 0 delete -->
+        <LinearLayout style="@style/LockKeyRow">
+            <Space android:layout_width="76dp" android:layout_height="76dp" android:layout_marginStart="14dp" android:layout_marginEnd="14dp"/>
+            <TextView android:id="@+id/key_0" style="@style/LockKey" android:text="0"/>
+            <ImageView
+                android:id="@+id/key_delete"
+                android:layout_width="76dp"
+                android:layout_height="76dp"
+                android:layout_marginStart="14dp"
+                android:layout_marginEnd="14dp"
+                android:padding="24dp"
+                android:src="@android:drawable/ic_input_delete"
+                android:contentDescription="@string/lock_delete"
+                android:tint="#2C6AA2"/>
+        </LinearLayout>
+
+        <View
+            android:layout_width="0dp"
+            android:layout_height="0dp"
+            android:layout_weight="1"/>
+
+        <TextView
+            android:id="@+id/lock_cancel"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="48dp"
+            android:paddingStart="62dp"
+            android:paddingEnd="62dp"
+            android:paddingTop="16dp"
+            android:paddingBottom="16dp"
+            android:background="@drawable/lock_pill_outline"
+            android:text="@string/lock_cancel"
+            android:textSize="17sp"
+            android:textStyle="bold"
+            android:textColor="#2C6AA2"/>
+    </LinearLayout>
+</FrameLayout>

@@ -20,10 +20,32 @@ class BootReceiver : BroadcastReceiver() {
     companion object {
         private const val TAG = "Loc360"
         const val ACTION_RESTART = "com.spacewire.circle360.RESTART_SERVICE"
+
+        /** The voice lock's equivalent, from [VoiceLockService.onTaskRemoved]. */
+        const val ACTION_RESTART_VOICE = "com.spacewire.circle360.RESTART_VOICE"
     }
 
     override fun onReceive(context: Context, intent: Intent) {
         val action = intent.action
+
+        // The voice lock, re-armed after an OEM ROM killed the process. Deliberately NOT on
+        // BOOT_COMPLETED: Android 14+ throws ForegroundServiceStartNotAllowedException for a
+        // microphone service started from a boot broadcast, and there is no exemption to apply
+        // for. After a reboot the user has to open the app once — see VoiceLockService.
+        if (action == ACTION_RESTART_VOICE) {
+            if (SunioState.isEnabled(context)) {
+                // This arrives from an AlarmManager broadcast, which is the background — and
+                // Android 12+ throws ForegroundServiceStartNotAllowedException for a foreground
+                // service started there, outright and always for the microphone type on 14+.
+                // The attempt is still worth making because it succeeds while the app is briefly
+                // still foreground-ish after a swipe-away, but it must never take the process
+                // down: the user reopening the app is what re-arms it for certain.
+                runCatching { VoiceLockService.start(context) }
+                    .onFailure { Log.d(TAG, "could not re-arm the voice lock: ${it.message}") }
+            }
+            return
+        }
+
         val relevant = action == Intent.ACTION_BOOT_COMPLETED ||
             action == Intent.ACTION_LOCKED_BOOT_COMPLETED ||
             action == "android.intent.action.QUICKBOOT_POWERON" ||

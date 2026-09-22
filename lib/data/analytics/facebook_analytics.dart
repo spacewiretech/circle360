@@ -33,12 +33,24 @@ import 'analytics_events.dart';
 /// corrected, without shipping a release. The Facebook **app secret** is not used here and must
 /// never be: it is a server-side Conversions API credential, and this app has no Conversions API.
 class FacebookAnalytics implements Analytics {
-  FacebookAnalytics({FacebookAppEvents? events, SharedPreferencesAsync? preferences})
-      : _events = events ?? FacebookAppEvents(),
+  FacebookAnalytics({
+    FacebookAppEvents? events,
+    SharedPreferencesAsync? preferences,
+    this.contentId = 'circle360_subscription',
+  })  : _events = events ?? FacebookAppEvents(),
         _preferences = preferences ?? SharedPreferencesAsync();
 
   final FacebookAppEvents _events;
   final SharedPreferencesAsync _preferences;
+
+  /// What this app calls its subscription to Facebook.
+  ///
+  /// Both apps in this build report to the **same Facebook app**, and [registerSuper] is a no-op
+  /// here because Facebook's parameters are per-event — so unlike Mixpanel there is no ambient
+  /// `app` property. This is the only thing distinguishing the two products' conversions on the
+  /// Facebook side. Supplied by the caller from `AppVariant.fbContentId`; the default keeps every
+  /// existing call site and test reporting exactly what it always did.
+  final String contentId;
 
   /// The one purchase this app can ever report, remembered across launches.
   ///
@@ -135,7 +147,7 @@ class FacebookAnalytics implements Analytics {
           _events.logInitiatedCheckout(
             totalPrice: _amountFor(properties[P.offerType]),
             currency: _currency,
-            contentId: 'circle360_subscription',
+            contentId: contentId,
             numItems: 1,
             paymentInfoAvailable: false,
           );
@@ -192,12 +204,12 @@ class FacebookAnalytics implements Analytics {
 
     final amount = _amountFor(properties[P.offerType]);
     final orderId = properties[P.paymentAttemptId]?.toString() ??
-        'circle360_${DateTime.now().millisecondsSinceEpoch}';
+        '${contentId}_${DateTime.now().millisecondsSinceEpoch}';
 
     await _events.logPurchase(
       amount: amount,
       currency: _currency,
-      parameters: {'fb_content_id': 'circle360_subscription', 'fb_order_id': orderId},
+      parameters: {'fb_content_id': contentId, 'fb_order_id': orderId},
     );
     await _events.logStartTrial(price: amount, currency: _currency, orderId: orderId);
   }

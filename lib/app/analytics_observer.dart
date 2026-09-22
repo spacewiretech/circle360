@@ -2,6 +2,7 @@ import 'package:flutter/widgets.dart';
 
 import '../data/analytics/analytics.dart';
 import '../data/analytics/analytics_events.dart';
+import '../suniomax/app/routes.dart';
 import 'router.dart';
 
 /// Human names for the route patterns in [Routes].
@@ -31,6 +32,24 @@ const _screenNames = <String, String>{
   'diagnostics': 'Diagnostics',
 };
 
+/// The same, for SunioMax — the second app in this build.
+///
+/// Prefixed rather than merged into the map above, even though `app` already distinguishes them
+/// as a super property. Two reasons: a Mixpanel report built before SunioMax existed keeps
+/// meaning what it meant, and anybody reading a raw event list can tell the two products apart
+/// without remembering to add a breakdown.
+const _sunioScreenNames = <String, String>{
+  SxRoutes.splash: 'SX Splash',
+  SxRoutes.language: 'SX Language',
+  SxRoutes.phone: 'SX Phone',
+  SxRoutes.otp: 'SX OTP',
+  SxRoutes.name: 'SX Name',
+  SxRoutes.subscribe: 'SX Paywall',
+  SxRoutes.paymentStatus: 'SX Payment Status',
+  SxRoutes.home: 'SX Home',
+  SxRoutes.settings: 'SX Settings',
+};
+
 /// Names for the surfaces that are routes but not screens.
 ///
 /// Modal sheets and dialogs push real routes, so without this they would arrive as anonymous
@@ -47,7 +66,9 @@ const _modalNames = <String, String>{
 /// The friendly name for a route pattern, or null when it is not one we know.
 String? screenNameFor(String? routeName) {
   if (routeName == null) return null;
-  return _screenNames[routeName] ?? _modalNames[routeName];
+  return _screenNames[routeName] ??
+      _sunioScreenNames[routeName] ??
+      _modalNames[routeName];
 }
 
 /// Emits screen views, screen exits and back presses for every route the app pushes.

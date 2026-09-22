@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A filled passcode dot, in the SunioMax brand blue. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="oval">
+    <solid android:color="#2C6AA2"/>
+    <size android:width="14dp" android:height="14dp"/>
+</shape>

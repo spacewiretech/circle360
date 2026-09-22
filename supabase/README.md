@@ -192,7 +192,7 @@ handles logs a warning.
 |---|---|---|
 | `send-otp` | anon | quota check → Fast2SMS send |
 | `resend-otp` | anon | quota check → Fast2SMS resend, reissuing a new code once the 10-minute window closes |
-| `verify-otp` | anon | Fast2SMS verify → upsert `users` row → issue a session token |
+| `verify-otp` | anon | Fast2SMS verify → upsert `users` row (stamping `signup_app` on insert) → issue a session token |
 | `me` | bearer | resolve token → user + entitlement; `DELETE` signs out |
 | `update-profile` | bearer | set `name` on the caller's own row |
 | `subscription-start` | bearer | open a Cashfree mandate, return the checkout session |
@@ -237,6 +237,29 @@ secret carrying `sub = user_id`; the policies then become the usual `auth.uid() 
   file is the app's offline fallback for this table, and without a line there the row's answer on
   a device that never reached Supabase is whatever `defaultAppConfig` happens to hold. Never add
   a private row to it: the env file ships inside the APK.
+- **`users.signup_app`.** Which of the two apps in the build an account was created in —
+  `circle360` or `suniomax`, constrained to those two. **Attribution only**: it never affects
+  entitlement, pricing or which Cashfree plan is used, and both apps open the same mandate. Set
+  once, on insert, by `verify-otp`, from a client-asserted field — which is safe precisely because
+  it authorises nothing. `mobile_no` stays **globally** unique, so one number is one account across
+  both apps; a Circle360 subscriber who installs SunioMax signs into the account they already have
+  and is already entitled. Making it `(signup_app, mobile_no)` would let one person hold two rows
+  and be billed twice for one subscription.
+- **The SunioMax gate rows.** `suniomax_enabled`, `suniomax_utm_sources` and
+  `suniomax_utm_campaigns` are public `app_config` rows read by the **client**, not by any
+  function — they decide which installs run the second app. A device's first launch happens before
+  any fetch has succeeded, so a brand new install is judged by the bundled
+  `APP_CONFIG_SUNIOMAX_*` lines and these rows take over from its second launch.
+- **The SunioMax media rows.** `suniomax_audio_language_url`, `_phone_url`, `_otp_url` and
+  `_name_url` hold a short spoken prompt per onboarding step — SunioMax is voice-controlled, sold
+  through Hindi-language campaigns, and offers nine Indian languages, so its onboarding cannot be
+  text-only. `suniomax_paywall_video_url` splits footage the two apps were sharing and **falls back
+  to `paywall_video_url`** when blank, so it ships empty and changes nothing. All five are public
+  (CDN assets, not credentials), all five are **https or nothing** — iOS ATS and Android both
+  refuse cleartext — and for all five **blank means silence and no control on screen**, which is
+  the seeded state and a supported one. Deliberately not extended to SunioMax's home screen: that
+  is where the microphone listens, and a voice-over transcribed by a live `SpeechRecognizer` can
+  match the lock phrase and lock the user's phone by itself.
 - **Payment tables.** `subscriptions`, `subscription_payments` and `payment_events` are all
   RLS-on with zero policies, like `users`. `subscription_payments` is unique on `cf_payment_id`
   and `payment_events` on `dedupe_key`, which is what makes webhook redelivery a no-op rather

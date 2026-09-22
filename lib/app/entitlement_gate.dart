@@ -9,6 +9,7 @@ import '../data/analytics/analytics_events.dart';
 import '../data/entitlement.dart';
 import '../data/models/app_user.dart';
 import '../data/providers.dart';
+import '../suniomax/app/routes.dart';
 import 'analytics_observer.dart';
 import 'router.dart';
 
@@ -100,12 +101,12 @@ class _EntitlementGateState extends ConsumerState<EntitlementGate>
       // payment one — send them to the start of onboarding, not to the paywall.
       if (user == null) {
         _reportEviction(null, 'session_lost');
-        context.go(Routes.phone);
+        context.go(_routes.phone);
         return;
       }
       if (!user.entitled) {
         _reportEviction(user, 'not_entitled');
-        context.go(Routes.subscribe);
+        context.go(_routes.subscribe);
         return;
       }
 
@@ -159,10 +160,47 @@ class _EntitlementGateState extends ConsumerState<EntitlementGate>
     ref.listen(entitlementProvider, (_, user) {
       if (user != null && !user.entitled && mounted) {
         _reportEviction(user, 'entitlement_changed');
-        context.go(Routes.subscribe);
+        context.go(_routes.subscribe);
       }
     });
 
     return widget.child;
   }
+
+  /// The route pair to evict to, for whichever app this install is running.
+  ///
+  /// This widget wraps everything behind the paywall in *both* apps — the entitlement is the
+  /// same one, resolved by the same Edge Function against the same Cashfree mandate, so a second
+  /// gate would be the same logic twice. Only the destinations differ, and the variant provider
+  /// is the one thing that knows which. It defaults to Circle360 wherever it has not been
+  /// overridden, which is every widget test.
+  _EvictionRoutes get _routes => ref.read(appVariantProvider).isSunioMax
+      ? const _SunioRoutes()
+      : const _Loc360Routes();
+}
+
+/// Where a user goes when they are put back outside the paid app.
+abstract interface class _EvictionRoutes {
+  String get phone;
+  String get subscribe;
+}
+
+class _Loc360Routes implements _EvictionRoutes {
+  const _Loc360Routes();
+
+  @override
+  String get phone => Routes.phone;
+
+  @override
+  String get subscribe => Routes.subscribe;
+}
+
+class _SunioRoutes implements _EvictionRoutes {
+  const _SunioRoutes();
+
+  @override
+  String get phone => SxRoutes.phone;
+
+  @override
+  String get subscribe => SxRoutes.subscribe;
 }

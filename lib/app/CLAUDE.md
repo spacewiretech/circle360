@@ -6,8 +6,8 @@ The wiring between `main()` and the screens. 6 files plus `theme/`.
 |---|---|
 | `app.dart` | `Loc360App`, the `MaterialApp.router`. Watches `deeplinkListenerProvider` and `analyticsBootstrapProvider` here rather than on the splash so both outlive the screen that triggered them — the splash is replaced within a frame or two. Also listens for a warm-start invite and routes to `/invite`. |
 | `router.dart` | `Routes` constants + the flat `GoRouter`. No global redirect: the splash resolves the session and each onboarding step picks its own next step. `SplashDestinationRoute` maps a resolved destination to a route, shared by splash and invite. |
-| `entitlement_gate.dart` | Wraps every screen behind the paywall and bounces the user back when access lapses. Exists because the splash gate only runs at cold start, and the trial is short enough to expire while the app sits in a pocket. |
-| `analytics_observer.dart` | One `NavigatorObserver` instruments every screen, modal and back gesture. Hand-written screen names keyed by route *pattern* (that is what go_router puts in `RouteSettings.name`). |
+| `entitlement_gate.dart` | Wraps every screen behind the paywall and bounces the user back when access lapses. Exists because the splash gate only runs at cold start, and the trial is short enough to expire while the app sits in a pocket. Shared by **both** apps — the entitlement is the same one, so only the routes it evicts to differ, chosen from `appVariantProvider`. |
+| `analytics_observer.dart` | One `NavigatorObserver` instruments every screen, modal and back gesture. Hand-written screen names keyed by route *pattern* (that is what go_router puts in `RouteSettings.name`). Covers both apps; SunioMax's names are prefixed `SX`. |
 | `env.dart` | Values read from `assets/env/app.env` at startup. Every getter tolerates a missing file — that is what flips `isConfigured` false and drops the app onto the fake rung. Also `Env.appConfig`: the `APP_CONFIG_*` lines, stripped and lowercased into `app_config` keys, which is the offline fallback for that table. Blank values are skipped and secret-shaped keys refused — the file ships inside the APK. |
 | `assets.dart` | `Img` and `Svg` — every asset in the app, exported from Figma. |
 
@@ -33,3 +33,10 @@ The wiring between `main()` and the screens. 6 files plus `theme/`.
   just came from and they would never see the outcome.
 - **`/location` is gated but is not itself a gate** — it always offers a way through to Home,
   whatever the user answers.
+- **There is a second router.** `lib/suniomax/app/router.dart` is the other app in this build, and
+  it needs the same `Firebase.apps.isNotEmpty` guard for the same reason. Its paths are all
+  namespaced `/sx`, because `screenNameFor` here keys off the route pattern and a shared `/phone`
+  would merge two unrelated onboarding funnels permanently. Two files here import from
+  `lib/suniomax/`: `analytics_observer.dart` (the screen names) and `entitlement_gate.dart`
+  (the eviction routes). Both import compile-time constants only, and `routes.dart` is split out
+  of the SunioMax router so neither drags in a screen.

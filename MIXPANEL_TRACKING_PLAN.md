@@ -102,6 +102,7 @@ Gathered once at boot and merged into every event, so no call site has to pass t
 | `build_mode` | string | `release` / `profile` / `debug` — **filter `build_mode = release` in every report** |
 | `env` | string | From `app_config` |
 | `backend_mode` | string | `supabase` / `fast2sms` / `fake` — a developer running against the fake repositories would otherwise pollute production funnels with free subscriptions |
+| `app` | string | `circle360` / `suniomax` — **which of the two apps in the build produced the event.** One APK ships both, and they have different screens, different audiences and different conversion rates. Registered at boot before anything is tracked, so it is on the buffered launch events too. Every report below is Circle360 unless it says otherwise; add `app = circle360` to any funnel you want to keep meaning what it meant. |
 | `app_language`, `app_locale` | string | The language the app is *rendering* in. A Hindi speaker and an English speaker in the same city are the same row without this, and they are not the same user |
 | `utc_offset_minutes` | number | India is UTC+5:30 and the backend stores UTC |
 | `queued_lag_ms` | number | Present only when the event waited for the Mixpanel token |
@@ -557,6 +558,41 @@ invite URL; if a review ever tightens what leaves the device, that is the first 
 
 ---
 
+## 16b. SunioMax — the second app in the build
+
+SunioMax is shown only to installs that arrived through a paid campaign, identified by the Play
+install referrer. **Every event it sends carries `app = suniomax`**, and it reuses Circle360's
+onboarding, paywall and payment events wholesale — same ViewModels, same Edge Functions, same
+Cashfree plan. So the onboarding and payment funnels in [§6](#6-app-events--onboarding--sign-out)
+and [§7](#7-app-events--paywall--payment) apply to it unchanged; split them with `app`.
+
+Screen names are prefixed `SX` (`SX Splash`, `SX Language`, `SX Phone`, `SX OTP`, `SX Name`,
+`SX Paywall`, `SX Payment Status`, `SX Home`) so that a raw event list is readable without
+remembering to add a breakdown, and so reports built before SunioMax existed keep their meaning.
+
+### Events SunioMax has and Circle360 does not (9)
+
+| Event | When | Properties |
+|-------|------|-----------|
+| `Language Selected` | The picker's continue button | `app_language`, `app_locale` |
+| `Voice Lock Changed` | Master switch moved | `enabled`, `phrase_word_count`, `has_passcode` |
+| `Voice Phrase Saved` | A phrase is set or changed | `phrase_word_count` |
+| `Backup Passcode Set` | A passcode is set or changed | `has_passcode` |
+| `App Lock Changed` | The per-app lock list changed | `locked_app_count` |
+| `Find Phone Changed` | Master switch moved | `enabled`, `clap_count` |
+| `Clap Pattern Saved` | Clap count changed | `clap_count` |
+| `Find Phone Alert Changed` | Sound / vibration / flashlight toggled | `alert_type`, `enabled` |
+| `Tap To Speak Tapped` | The mic blob on the Sunio tab | `enabled` — false while the recogniser does not exist yet |
+
+**The voice phrase and the backup passcode are never sent anywhere.** One unlocks a phone and the
+other is the way back in when it fails; only their shape (`phrase_word_count`, `has_passcode`) is
+reportable. This is not an oversight to be corrected later.
+
+The language is reported through the existing `app_language` / `app_locale` super properties, not
+a new key — the picker registers them as supers, so every subsequent event carries the choice.
+
+---
+
 ## 17. Event count summary
 
 | Category | Live events |
@@ -570,7 +606,8 @@ invite URL; if a review ever tightens what leaves the device, that is the first 
 | Invite | 3 |
 | Emergency & account | 5 |
 | Ad attribution & splash | 2 |
-| **App subtotal** | **99** |
+| SunioMax-only surfaces | 9 |
+| **App subtotal** | **108** |
 | Server / webhook | 9 |
-| **Total live** | **108** |
+| **Total live** | **117** |
 | Declared but not emitted | **0** |

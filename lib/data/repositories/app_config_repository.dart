@@ -30,6 +30,51 @@ const mixpanelTokenKey = 'mixpanel_token';
 const facebookAppIdKey = 'facebook_app_id';
 const facebookEnabledKey = 'facebook_events_enabled';
 
+/// The rule deciding which install runs SunioMax instead of Circle360.
+///
+/// Config rows rather than constants because the whole point is to be able to widen, narrow or
+/// kill the second app's audience from the dashboard, without a release and without a review.
+/// [sunioMaxEnabledKey] is the master switch; [sunioMaxUtmSourcesKey] is a comma-separated
+/// allowlist of `utm_source` values, and [sunioMaxUtmCampaignsKey] narrows that to named
+/// campaigns — blank meaning any campaign from an allowed source.
+///
+/// Public rows, and safe to be: they describe who sees which app, not how anything is paid for.
+/// None of the three trips `app_config_secrets_stay_private` or [Env.parseAppConfig]'s matching
+/// refusal — which is worth keeping true if these are ever renamed.
+const sunioMaxEnabledKey = 'suniomax_enabled';
+const sunioMaxUtmSourcesKey = 'suniomax_utm_sources';
+const sunioMaxUtmCampaignsKey = 'suniomax_utm_campaigns';
+
+/// SunioMax's spoken onboarding prompts, and its own paywall promo.
+///
+/// The four audio rows exist because SunioMax is sold to people who may not read English
+/// comfortably — a voice-controlled product, bought through Hindi-language campaigns, whose
+/// picker offers nine Indian languages. Config rows rather than bundled assets so a clip can be
+/// recut, re-recorded in another language or withdrawn without shipping a release, which is the
+/// same argument `paywall_video_url` is here for.
+///
+/// [sunioMaxPaywallVideoKey] splits footage the two apps were sharing. Read *first*, falling back
+/// to `paywall_video_url` when blank — so the row can ship empty and change nothing.
+///
+/// Constants rather than literals at the call sites, unlike `paywall_video_url`, which has none
+/// and is typed out at each of its two readers. Five keys read from four places is where that
+/// stops being tolerable.
+///
+/// Public rows, and safe to be: marketing assets on a CDN, not credentials. None of the five trips
+/// `app_config_secrets_stay_private` or [Env.parseAppConfig]'s matching refusal — they end in
+/// `_url`, which matches none of its patterns. Worth keeping true if they are ever renamed,
+/// because a refused key is dropped with a `debugPrint` rather than an exception: nothing would
+/// fail, the clip would simply never play.
+const sunioMaxAudioLanguageKey = 'suniomax_audio_language_url';
+const sunioMaxAudioPhoneKey = 'suniomax_audio_phone_url';
+const sunioMaxAudioOtpKey = 'suniomax_audio_otp_url';
+const sunioMaxAudioNameKey = 'suniomax_audio_name_url';
+const sunioMaxPaywallVideoKey = 'suniomax_paywall_video_url';
+
+/// The row [sunioMaxPaywallVideoKey] falls back to. Circle360's promo, and the one both apps
+/// showed before the split.
+const paywallVideoKey = 'paywall_video_url';
+
 /// The last resort, for a checkout with no env file at all.
 ///
 /// A cold start must never block on the network, so these have to be good enough to run on. They
@@ -64,6 +109,13 @@ const defaultAppConfig = <String, String>{
   // The real value is served from `app_config` — see 20260909010000_facebook.sql.
   facebookAppIdKey: '',
   facebookEnabledKey: 'true',
+  // The SunioMax gate. Off here on purpose, and in the same spirit as the two above: a fresh
+  // clone, every test and any build whose env file says nothing runs Circle360 and only
+  // Circle360. Turning the second app on is something a build or a dashboard row has to say
+  // out loud. See lib/suniomax/data/app_variant.dart.
+  sunioMaxEnabledKey: 'false',
+  sunioMaxUtmSourcesKey: '',
+  sunioMaxUtmCampaignsKey: '',
 };
 
 /// [defaultAppConfig] with the `APP_CONFIG_*` entries from `assets/env/app.env` layered on top.
@@ -75,14 +127,17 @@ const defaultAppConfig = <String, String>{
 ///
 /// A function rather than a constant because [Env.appConfig] is only populated once `Env.load()`
 /// has run, which is after every `const` in this file is already fixed.
-Map<String, String> appConfigFallbacks() =>
-    {...defaultAppConfig, ...Env.appConfig};
+Map<String, String> appConfigFallbacks() => {
+  ...defaultAppConfig,
+  ...Env.appConfig,
+};
 
 /// The same precedence as [appConfigFallbacks], resolved one key at a time.
 ///
 /// The typed reads below sit inside build methods, so they take this rather than merging two
 /// maps to read a single string out of the result.
-String _fallback(String key) => Env.appConfig[key] ?? defaultAppConfig[key] ?? '';
+String _fallback(String key) =>
+    Env.appConfig[key] ?? defaultAppConfig[key] ?? '';
 
 /// Typed reads over the raw key/value map, so a bad or missing value can never crash a screen.
 extension AppConfigValues on Map<String, String> {
@@ -94,5 +149,7 @@ extension AppConfigValues on Map<String, String> {
   bool configFlag(String key) => configString(key).toLowerCase() == 'true';
 
   double configDouble(String key) =>
-      double.tryParse(configString(key)) ?? double.tryParse(_fallback(key)) ?? 0;
+      double.tryParse(configString(key)) ??
+      double.tryParse(_fallback(key)) ??
+      0;
 }

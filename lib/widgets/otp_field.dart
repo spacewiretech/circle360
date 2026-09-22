@@ -4,6 +4,16 @@ import 'package:flutter/services.dart';
 import '../app/theme/app_colors.dart';
 import '../app/theme/app_typography.dart';
 
+/// Draws one box: the digit it holds, and whether it is the one awaiting input.
+///
+/// Exists so a second brand can restyle the boxes without reimplementing the input handling
+/// below — which is the part that is easy to get wrong and expensive to get wrong twice.
+typedef OtpBoxBuilder = Widget Function(
+  BuildContext context,
+  String digit,
+  bool focused,
+);
+
 /// The boxed code entry from the design.
 ///
 /// Deliberately **one** `TextField` holding the whole code, with the boxes as decoration over
@@ -18,6 +28,8 @@ class OtpField extends StatefulWidget {
     required this.onChanged,
     this.onCompleted,
     this.controller,
+    this.boxBuilder,
+    this.spacing = 8,
   });
 
   final int length;
@@ -26,6 +38,12 @@ class OtpField extends StatefulWidget {
 
   /// Lets the screen empty the boxes when the provider rejects a code.
   final OtpFieldController? controller;
+
+  /// How each box is drawn. Defaults to the Circle360 rounded square.
+  final OtpBoxBuilder? boxBuilder;
+
+  /// Gap between boxes. SunioMax's circles sit further apart than Circle360's squares.
+  final double spacing;
 
   @override
   State<OtpField> createState() => _OtpFieldState();
@@ -103,13 +121,19 @@ class _OtpFieldState extends State<OtpField> {
           Row(
             children: [
               for (var i = 0; i < widget.length; i++) ...[
-                if (i > 0) const SizedBox(width: 8),
+                if (i > 0) SizedBox(width: widget.spacing),
                 Expanded(
                   child: AspectRatio(
                     aspectRatio: 1,
-                    child: _Box(
-                      digit: i < code.length ? code[i] : '',
-                      focused: _node.hasFocus && i == activeIndex,
+                    child: Builder(
+                      builder: (context) {
+                        final digit = i < code.length ? code[i] : '';
+                        final focused = _node.hasFocus && i == activeIndex;
+                        final build = widget.boxBuilder;
+                        return build == null
+                            ? _Box(digit: digit, focused: focused)
+                            : build(context, digit, focused);
+                      },
                     ),
                   ),
                 ),
